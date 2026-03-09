@@ -51,7 +51,8 @@ def cmd_connect(args):
 def cmd_download(args):
     from .download import download_dataset
     o = _conn()
-    download_dataset(o, args.dataset_code, args.output, list_only=args.list_only, force=args.force)
+    for code in args.dataset_codes:
+        download_dataset(o, code, args.output, list_only=args.list_only, force=args.force)
 
 
 def cmd_download_collection(args):
@@ -284,8 +285,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("connect", help="Test connection and list spaces")
 
     # ---- download ----
-    dl = sub.add_parser("download", help="Download a dataset")
-    dl.add_argument("dataset_code")
+    dl = sub.add_parser("download", help="Download one or more datasets")
+    dl.add_argument("dataset_codes", nargs="+", metavar="DATASET_CODE")
     dl.add_argument("--output", "-o", default=None, help="Output directory")
     dl.add_argument("--list-only", action="store_true")
     dl.add_argument("--force", action="store_true")

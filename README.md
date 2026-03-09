@@ -360,7 +360,7 @@ obtools ingest /data/runs/ --collection /DDB/CK/E_Sepsis2025 --skip-samples
 
 ## Download
 
-### Single dataset
+### Single or multiple datasets
 
 ```bash
 # List files without downloading
@@ -371,6 +371,9 @@ obtools download 20250807085639331-1331542
 
 # Download to specific location
 obtools download 20250807085639331-1331542 --output ~/data/sepsis/
+
+# Download multiple datasets at once
+obtools download 20250807085639331-1331542 20250807085639331-1331543 20250807085639331-1331544
 ```
 
 ### Entire collection
