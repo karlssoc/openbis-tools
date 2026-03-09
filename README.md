@@ -1,16 +1,16 @@
 # openbis-tools
 
-Proteomics-focused OpenBIS CLI toolkit for the DDB/CK group. Installs a single command, `obtools`, covering sample registration, dataset upload (FASTA, spectral libraries), download, search, and controlled vocabulary lookup.
+Proteomics-focused OpenBIS CLI toolkit for LU-IMP group. Installs a single command, `obtools`, covering sample registration, dataset upload (FASTA, spectral libraries), download, search, and controlled vocabulary lookup.
 
 ---
 
 ## Installation
 
 ```bash
-git clone https://github.com/karlssoc/openbis-tools.git
-cd openbis-tools
-pipx install .
+pipx install git+https://github.com/karlssoc/openbis-tools.git
 ```
+
+
 
 Verify:
 
