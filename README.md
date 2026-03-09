@@ -33,14 +33,26 @@ Edit `~/.openbis/credentials`:
 ```
 OPENBIS_URL=https://your-server.com/openbis/
 OPENBIS_USERNAME=your_username
-OPENBIS_PASSWORD=your_password
 
 # Optional
 # OBTOOLS_DOWNLOAD_DIR=~/data/openbis
 # OBTOOLS_VERIFY_CERTS=false
 ```
 
-Environment variables (`OPENBIS_URL`, `OPENBIS_USERNAME`, `OPENBIS_PASSWORD`) override the file if set.
+**Store your password in the OS keychain** (recommended — no plaintext passwords):
+
+```bash
+# macOS
+security add-generic-password -a your_username -s openbis-tools -w
+
+# Windows
+cmdkey /generic:openbis-tools /user:your_username /pass:your_password
+
+# Linux (requires libsecret-tools)
+secret-tool store --label=openbis-tools service openbis-tools username your_username
+```
+
+`obtools` reads the password from the keychain automatically. Environment variables (`OPENBIS_URL`, `OPENBIS_USERNAME`, `OPENBIS_PASSWORD`) override all other sources if set.
 
 Test your connection:
 
@@ -58,6 +70,7 @@ obtools connect
 | `download` | yes | Download a dataset by code |
 | `download-collection` | yes | Download all datasets in a collection |
 | `info` | yes | Show dataset details and lineage |
+| `ingest` | yes | Discover raw MS files, create samples, upload datasets |
 | `search` | yes | Search datasets, samples, experiments |
 | `upload` | yes | Upload a file (auto-detect type) |
 | `upload-fasta` | yes | Upload a FASTA database |
@@ -280,6 +293,71 @@ obtools upload datafile.txt        # uploaded as unknown type
 
 ---
 
+## Raw Data Ingest (`ingest`)
+
+Scans a directory for Thermo `.raw` files and Bruker `.d` directories, creates one `BIOL_DDB` sample per acquisition, and uploads each file as a `RAW_DATA` dataset linked to that sample.
+
+Bruker `.d` directories are automatically compressed to `.zip` before upload (stdlib `zipfile` — no external tools). macOS metadata (`__MACOSX/`, `.DS_Store`, `._*`) is excluded from archives.
+
+Dataset metadata populated automatically:
+
+| Property | Thermo `.raw` | Bruker `.d` |
+|---|---|---|
+| `File Name` | original filename | original `.d` dir name |
+| `File Size` | file size in bytes | zip archive size in bytes |
+| `ACQUISITION_DATE` | file modification time | read from `analysis.tdf` |
+| `INSTRUMENT_SN` | `MS:1000529` (default) | `MS:1003404` |
+| `INSTRUMENT_NAME` | `Q_Exactive_HF-X_Orbitrap` (default) | `timsTOF_HT` |
+
+**Basic usage:**
+
+```bash
+obtools ingest /data/runs/ --collection /DDB/CK/E_Sepsis2025
+```
+
+**Create the collection if it does not exist:**
+
+```bash
+obtools ingest /data/runs/ --collection /DDB/CK/E_NewStudy --create-collection
+```
+
+**Preview without writing anything:**
+
+```bash
+obtools ingest /data/runs/ --collection /DDB/CK/E_Sepsis2025 --dry-run
+```
+
+**Override Thermo instrument defaults** (e.g. if files came from a different instrument):
+
+```bash
+obtools ingest /data/runs/ --collection /DDB/CK/E_Sepsis2025 \
+  --raw-instrument-sn MS:1000031 \
+  --raw-instrument-name "LTQ_Orbitrap"
+```
+
+**Upload datasets only, skip sample creation:**
+
+```bash
+obtools ingest /data/runs/ --collection /DDB/CK/E_Sepsis2025 --skip-samples
+```
+
+**All flags:**
+
+| Flag | Description |
+|---|---|
+| `--collection`, `-c` | OpenBIS collection path (required) |
+| `--create-collection` | Create the collection if it does not exist |
+| `--collection-type` | Collection type when creating (default: `MS_EXPERIMENT`) |
+| `--dataset-type` | Dataset type for uploaded files (default: `RAW_DATA`) |
+| `--sample-type` | Sample type to create (default: `BIOL_DDB`) |
+| `--prefix` | Prefix for sample `$NAME` (default: source directory name) |
+| `--skip-samples` | Upload datasets only, do not create samples |
+| `--raw-instrument-sn` | `INSTRUMENT_SN` for Thermo `.raw` files (default: `MS:1000529`) |
+| `--raw-instrument-name` | `INSTRUMENT_NAME` for Thermo `.raw` files (default: `Q_Exactive_HF-X_Orbitrap`) |
+| `--dry-run` | Preview everything without writing to OpenBIS |
+
+---
+
 ## Download
 
 ### Single dataset
@@ -360,8 +438,20 @@ obtools info 20250502110516300-1323376 --lineage
 |---|---|---|
 | `OPENBIS_URL` | yes | Full server URL including `/openbis/` |
 | `OPENBIS_USERNAME` | yes | Your OpenBIS username |
-| `OPENBIS_PASSWORD` | yes | Your OpenBIS password |
+| `OPENBIS_PASSWORD` | no* | Password — prefer macOS Keychain (see below) |
 | `OBTOOLS_DOWNLOAD_DIR` | no | Default download directory (default: `~/data/openbis`) |
 | `OBTOOLS_VERIFY_CERTS` | no | SSL certificate verification: `true` or `false` (default: `false`) |
 
-Environment variables with the same names override the file.
+\* `OPENBIS_PASSWORD` is required but can be stored in the OS keychain instead of the file.
+
+**Credential priority (highest wins):** environment variable → macOS Keychain → credentials file
+
+**Store password in OS keychain:**
+```bash
+# macOS
+security add-generic-password -a your_username -s openbis-tools -w
+# Windows
+cmdkey /generic:openbis-tools /user:your_username /pass:your_password
+# Linux
+secret-tool store --label=openbis-tools service openbis-tools username your_username
+```

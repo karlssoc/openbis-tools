@@ -18,11 +18,12 @@ Usage:
 
 from __future__ import annotations
 
+import datetime
+import sqlite3
 import sys
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Iterator
 
 from pybis import Openbis
 
@@ -38,6 +39,67 @@ def _is_mac_metadata(path: Path) -> bool:
         if part.lower() in _MAC_EXCLUSIONS or part.startswith("._"):
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Metadata extraction
+# ---------------------------------------------------------------------------
+
+def _bruker_acquisition_date(d_dir: Path) -> str | None:
+    """
+    Read acquisition datetime from a Bruker timsTOF analysis.tdf SQLite file.
+    Returns an ISO 8601 string, or None if unavailable.
+    """
+    tdf = d_dir / "analysis.tdf"
+    if not tdf.exists():
+        return None
+    try:
+        with sqlite3.connect(str(tdf)) as conn:
+            row = conn.execute(
+                "SELECT Value FROM GlobalMetadata WHERE Key='AcquisitionDateTime'"
+            ).fetchone()
+            if row:
+                return row[0]
+    except Exception:
+        pass
+    return None
+
+
+def _file_mtime_iso(path: Path) -> str:
+    """Return file modification time as ISO 8601 string (local timezone)."""
+    mtime = path.stat().st_mtime
+    return datetime.datetime.fromtimestamp(mtime).astimezone().isoformat()
+
+
+def _build_dataset_props(
+    raw: "RawFile",
+    upload_path: Path,
+    raw_instrument_sn: str,
+    raw_instrument_name: str,
+) -> dict:
+    """
+    Build a dict of OpenBIS dataset properties for a raw acquisition.
+
+    - file_name / file_size: derived from the upload path
+    - ACQUISITION_DATE: read from Bruker TDF, or file mtime for Thermo
+    - INSTRUMENT_SN / INSTRUMENT_NAME: vendor-specific defaults
+    """
+    props: dict = {
+        "file_name": raw.path.name,
+        "file_size": str(upload_path.stat().st_size),
+    }
+
+    if raw.vendor == "bruker":
+        props["INSTRUMENT_SN"] = "MS:1003404"
+        props["INSTRUMENT_NAME"] = "timsTOF_HT"
+        date = _bruker_acquisition_date(raw.path)
+        props["ACQUISITION_DATE"] = date if date else _file_mtime_iso(raw.path)
+    else:
+        props["INSTRUMENT_SN"] = raw_instrument_sn
+        props["INSTRUMENT_NAME"] = raw_instrument_name
+        props["ACQUISITION_DATE"] = _file_mtime_iso(raw.path)
+
+    return props
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +256,7 @@ def _upload_dataset(
     file_path: Path,
     dataset_type: str,
     sample_id: str | None,
+    props: dict,
     dry_run: bool,
 ) -> str | None:
     """Upload a file as a dataset. Returns permId or None on failure."""
@@ -202,6 +265,8 @@ def _upload_dataset(
 
     if dry_run:
         print(f"    [DRY RUN] Would upload dataset  (type: {dataset_type})")
+        for k, v in props.items():
+            print(f"              {k} = {v}")
         return f"DRY-RUN-DS-{file_path.stem}"
 
     try:
@@ -215,6 +280,11 @@ def _upload_dataset(
                 ds.sample = sample_id
             except Exception:
                 pass   # not all pybis versions support this — skip gracefully
+        for key, value in props.items():
+            try:
+                ds.props[key] = value
+            except Exception:
+                pass   # unknown property — server will reject; skip gracefully
         ds.save()
         return ds.permId
     except Exception as exc:
@@ -237,6 +307,8 @@ def ingest(
     sample_type: str = "BIOL_DDB",
     prefix: str | None = None,
     skip_samples: bool = False,
+    raw_instrument_sn: str = "MS:1000529",
+    raw_instrument_name: str = "Q_Exactive_HF-X_Orbitrap",
     dry_run: bool = False,
 ) -> None:
     """
@@ -305,7 +377,8 @@ def ingest(
             if sample_id:
                 print(f"    🧬 Sample: {sample_id}")
 
-        ds_id = _upload_dataset(o, collection_path, upload_path, dataset_type, sample_id, dry_run)
+        props = _build_dataset_props(raw, upload_path, raw_instrument_sn, raw_instrument_name)
+        ds_id = _upload_dataset(o, collection_path, upload_path, dataset_type, sample_id, props, dry_run)
         if ds_id:
             print(f"    📊 Dataset: {ds_id}")
 

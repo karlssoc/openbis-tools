@@ -262,6 +262,8 @@ def cmd_ingest(args):
         sample_type=args.sample_type,
         prefix=args.prefix,
         skip_samples=args.skip_samples,
+        raw_instrument_sn=args.raw_instrument_sn,
+        raw_instrument_name=args.raw_instrument_name,
         dry_run=args.dry_run,
     )
 
@@ -451,6 +453,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Prefix for sample $NAME (default: source directory name)")
     ing.add_argument("--skip-samples", action="store_true",
                      help="Upload datasets only, do not create samples")
+    ing.add_argument("--raw-instrument-sn", default="MS:1000529", metavar="SN",
+                     help="INSTRUMENT_SN for Thermo .raw files (default: MS:1000529)")
+    ing.add_argument("--raw-instrument-name", default="Q_Exactive_HF-X_Orbitrap", metavar="NAME",
+                     help="INSTRUMENT_NAME for Thermo .raw files (default: Q_Exactive_HF-X_Orbitrap)")
     ing.add_argument("--dry-run", action="store_true",
                      help="Preview everything without writing to OpenBIS or archiving files")
 
