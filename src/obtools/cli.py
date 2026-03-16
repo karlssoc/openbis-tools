@@ -16,6 +16,7 @@ Commands:
   register-tsv         Generate a BIOL_DDB registration TSV file (offline)
   vocab                List controlled vocabulary terms from OpenBIS
   ingest               Discover raw files, create samples, upload datasets
+  make-sequence        Generate a HyStar sequence file for Timmie (TimsTOF HT)
 """
 
 from __future__ import annotations
@@ -249,6 +250,12 @@ def cmd_vocab(args):
         list_vocabularies(o)
 
 
+def cmd_make_sequence(args):
+    """Generate a HyStar sequence file for Timmie (TimsTOF HT + EvoSep One)."""
+    from .sequence_timmie import run_wizard
+    run_wizard(args)
+
+
 def cmd_ingest(args):
     """Discover raw files, create samples, upload datasets."""
     from .ingest import ingest
@@ -461,6 +468,61 @@ def build_parser() -> argparse.ArgumentParser:
     ing.add_argument("--dry-run", action="store_true",
                      help="Preview everything without writing to OpenBIS or archiving files")
 
+    # ---- make-sequence ----
+    ms_p = sub.add_parser(
+        "make-sequence",
+        help="Generate a HyStar sequence file for Timmie (TimsTOF HT + EvoSep One)",
+        description=(
+            "Interactively builds a HyStar-compatible .xlsx sequence file.\n\n"
+            "Two modes:\n"
+            "  1. Register new samples in OpenBIS, then generate the sequence.\n"
+            "  2. Fetch existing BIOL_DDB samples from a collection and generate the sequence.\n\n"
+            "All options can be omitted — the wizard will prompt for anything missing.\n\n"
+            "Examples:\n"
+            "  obtools make-sequence\n"
+            "  obtools make-sequence --user CK --project 3000 --label Proteome\n"
+            "  obtools make-sequence --from-collection /DDB/CK/E_Proteome2025\n"
+            "  obtools make-sequence --experiment /DDB/CK/E_Proteome2025 --n 30 --ms-method dda"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ms_p.add_argument("--user", "-u", metavar="INITIALS",
+                      help="User initials (e.g. CK, SK) — prompted if omitted")
+    ms_p.add_argument("--project", "-p", metavar="CODE",
+                      help="Project code, e.g. 3000 (IMP) or 9129 (BioMS booking) — prompted if omitted")
+    ms_p.add_argument("--label", metavar="TEXT",
+                      help="Free-text label for the sequence (e.g. Proteome, Phospho) — prompted if omitted")
+    ms_p.add_argument("--data-path", metavar="PATH",
+                      help=r"Data path on Timmie PC (default: D:\Data\{USER})")
+
+    # Sample source (mutually exclusive)
+    src_grp = ms_p.add_mutually_exclusive_group()
+    src_grp.add_argument("--from-collection", metavar="PATH",
+                         help="Fetch existing BIOL_DDB samples from this OpenBIS collection")
+    src_grp.add_argument("--n", type=int, metavar="N",
+                         help="Register N new BIOL_DDB samples (requires --experiment)")
+    ms_p.add_argument("--experiment", "-e", metavar="PATH",
+                      help="OpenBIS experiment for new sample registration (used with --n)")
+
+    # Method selection
+    ms_p.add_argument("--lc-method", metavar="KEY",
+                      choices=["30spd", "60spd", "100spd", "200spd", "300spd"],
+                      help="LC method key (default: 30spd)")
+    ms_p.add_argument("--ms-method", metavar="KEY",
+                      choices=["dia-long", "dia-short", "dda", "phospho", "p2"],
+                      help="MS method key (default: dia-long for 30spd)")
+    ms_p.add_argument("--injections", type=int, metavar="N", default=None,
+                      help="Number of injections per sample (default: 1)")
+
+    ms_p.add_argument("--output", "-o", metavar="FILE",
+                      help="Output .xlsx path (default: auto-generated from user/project/label)")
+    ms_p.add_argument("--dry-run", action="store_true",
+                      help="Preview without writing the file or registering samples")
+    ms_p.add_argument("--no-confirm", action="store_true",
+                      help="Skip registration confirmation prompt")
+    # Pass-through flags for register_samples (used when --n is set)
+    _reg_common(ms_p)
+
     # ---- vocab ----
     vc = sub.add_parser(
         "vocab",
@@ -498,6 +560,7 @@ _HANDLERS = {
     "register-tsv":        cmd_register_tsv,
     "vocab":               cmd_vocab,
     "ingest":              cmd_ingest,
+    "make-sequence":       cmd_make_sequence,
 }
 
 

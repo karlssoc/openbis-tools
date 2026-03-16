@@ -132,7 +132,7 @@ def register_samples(
     """
     Register `n` BIOL_DDB objects in OpenBIS.
 
-    Returns list of created permIds. In dry_run mode returns [] and only prints.
+    Returns list of created sample codes (e.g. DDBS377561). In dry_run mode returns [] and only prints.
     """
     if n < 1:
         print("❌ --n must be at least 1")
@@ -236,7 +236,7 @@ def register_samples(
                 sample.parents = parents_val
 
             sample.save()
-            code = sample.permId or sample.identifier
+            code = sample.code
             created.append(code)
             print(f"  ✅ {name}  →  {code}")
         except Exception as exc:
