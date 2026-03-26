@@ -65,6 +65,28 @@ def cmd_download_collection(args):
     )
 
 
+def cmd_download_bruker(args):
+    from .download import download_bruker
+    if not args.collection and not args.dataset_codes:
+        print("❌ Provide a --collection path or one or more dataset codes")
+        sys.exit(1)
+    if args.collection and args.dataset_codes:
+        print("❌ --collection and dataset codes are mutually exclusive")
+        sys.exit(1)
+    o = _conn()
+    download_bruker(
+        o,
+        codes=args.dataset_codes or [],
+        output_dir=args.output,
+        collection=args.collection,
+        list_only=args.list_only,
+        limit=args.limit,
+        force=args.force,
+        extract_to=args.extract_to,
+        jobs=args.jobs,
+    )
+
+
 def cmd_info(args):
     o = _conn()
     try:
@@ -305,6 +327,38 @@ def build_parser() -> argparse.ArgumentParser:
     dc.add_argument("--list-only", action="store_true")
     dc.add_argument("--limit", type=int, default=None)
     dc.add_argument("--force", action="store_true")
+
+    # ---- download-bruker ----
+    db = sub.add_parser(
+        "download-bruker",
+        help="Download Bruker .zip datasets and optionally extract to .d folders",
+        description=(
+            "Downloads Bruker TimsTOF .zip datasets from OpenBIS and optionally extracts\n"
+            "them to .d folders in parallel. Skips already-downloaded/extracted files\n"
+            "unless --force is given.\n\n"
+            "Source: provide a --collection path OR one or more dataset codes.\n\n"
+            "Examples:\n"
+            "  obtools download-bruker --collection /DDB/DI_TANG_MS/E290847 \\\n"
+            "      --output input/raw/E290847 --extract-to input/raw/d/E290847\n"
+            "  obtools download-bruker DDBS377561 DDBS377562 --output input/raw/E290847\n"
+            "  obtools download-bruker --collection /DDB/DI_TANG_MS/E290847 --list-only"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    db.add_argument("dataset_codes", nargs="*", metavar="DATASET_CODE",
+                    help="One or more dataset codes (mutually exclusive with --collection)")
+    db.add_argument("--collection", "-c", metavar="PATH",
+                    help="OpenBIS collection path (download all datasets in it)")
+    db.add_argument("--output", "-o", required=True, metavar="DIR",
+                    help="Directory for downloaded .zip files")
+    db.add_argument("--extract-to", metavar="DIR",
+                    help="Extract .d folders here (omit to skip extraction)")
+    db.add_argument("--jobs", "-j", type=int, default=4, metavar="N",
+                    help="Parallel extraction jobs (default: 4)")
+    db.add_argument("--list-only", action="store_true")
+    db.add_argument("--limit", type=int, default=None)
+    db.add_argument("--force", action="store_true",
+                    help="Re-download and re-extract even if files already exist")
 
     # ---- info ----
     info = sub.add_parser("info", help="Show dataset info and lineage")
@@ -551,6 +605,7 @@ _HANDLERS = {
     "connect":             cmd_connect,
     "download":            cmd_download,
     "download-collection": cmd_download_collection,
+    "download-bruker":     cmd_download_bruker,
     "info":                cmd_info,
     "search":              cmd_search,
     "upload":              cmd_upload,

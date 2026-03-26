@@ -69,6 +69,7 @@ obtools connect
 | `connect` | yes | Test connection and list spaces |
 | `download` | yes | Download a dataset by code |
 | `download-collection` | yes | Download all datasets in a collection |
+| `download-bruker` | yes | Download Bruker .zip datasets and optionally extract to .d folders |
 | `info` | yes | Show dataset details and lineage |
 | `ingest` | yes | Discover raw MS files, create samples, upload datasets |
 | `search` | yes | Search datasets, samples, experiments |
@@ -388,6 +389,45 @@ obtools download-collection /DDB/CK/FASTA --limit 5 --output ~/data/fasta/
 # Download everything
 obtools download-collection /DDB/CK/PREDSPECLIB --output ~/data/libraries/
 ```
+
+All download commands skip datasets that are already present in the output directory.
+Use `--force` to re-download.
+
+### Bruker TimsTOF (.zip → .d)
+
+For Bruker datasets stored as `.zip` archives in OpenBIS, `download-bruker` downloads
+and optionally extracts to `.d` folders in one step. Already-downloaded datasets and
+already-extracted `.d` folders are skipped automatically.
+
+```bash
+# Download a full collection and extract .d folders (4 parallel jobs)
+obtools download-bruker --collection /DDB/DI_TANG_MS/E290847 \
+    --output input/raw/E290847 \
+    --extract-to input/raw/d/E290847 \
+    --jobs 4
+
+# Download specific dataset codes only
+obtools download-bruker DDBS377561 DDBS377562 \
+    --output input/raw/E290847 \
+    --extract-to input/raw/d/E290847
+
+# Download without extracting
+obtools download-bruker --collection /DDB/DI_TANG_MS/E290847 \
+    --output input/raw/E290847
+
+# List datasets without downloading
+obtools download-bruker --collection /DDB/DI_TANG_MS/E290847 \
+    --output input/raw/E290847 --list-only
+
+# Re-download and re-extract everything
+obtools download-bruker --collection /DDB/DI_TANG_MS/E290847 \
+    --output input/raw/E290847 \
+    --extract-to input/raw/d/E290847 \
+    --force
+```
+
+The zip contents are extracted directly into `<name>.d/`, mirroring
+`unzip file.zip -d name.d`. A zip containing `data/` → `name.d/data/`.
 
 ---
 
