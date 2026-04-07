@@ -41,9 +41,8 @@ def _collect_folder_files(folder: Path, excludes: list[str]) -> tuple[list[Path]
     return included, excluded
 
 
-def _zip_folder(folder: Path, excludes: list[str]) -> Path:
-    """Zip folder contents into a temp file, preserving structure from folder's parent."""
-    included, _ = _collect_folder_files(folder, excludes)
+def _zip_folder(folder: Path, included: list[Path]) -> Path:
+    """Zip a pre-collected list of files, preserving structure from folder's parent."""
     tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False, prefix=f"{folder.name}_")
     tmp.close()
     zip_path = Path(tmp.name)
@@ -51,6 +50,17 @@ def _zip_folder(folder: Path, excludes: list[str]) -> Path:
         for f in included:
             zf.write(f, f.relative_to(folder.parent))
     return zip_path
+
+
+def _write_manifest(folder: Path, included: list[Path]) -> Path:
+    """Write a text file listing all archived paths (relative), one per line."""
+    tmpdir = Path(tempfile.mkdtemp())
+    path = tmpdir / f"{folder.name}_manifest.txt"
+    path.write_text(
+        "\n".join(str(f.relative_to(folder.parent)) for f in included) + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -150,11 +160,16 @@ class Uploader:
             return None
 
         if is_folder:
-            zip_path = _zip_folder(fp, exclude or [])
+            included, _ = _collect_folder_files(fp, exclude or [])
+            zip_path = _zip_folder(fp, included)
+            manifest_path = _write_manifest(fp, included)
             try:
-                return self._perform_upload(zip_path, dataset_type, collection, human_name, notes, meta, extra_files, parent_list)
+                all_extra = list(extra_files or []) + [str(manifest_path)]
+                return self._perform_upload(zip_path, dataset_type, collection, human_name, notes, meta, all_extra, parent_list)
             finally:
                 zip_path.unlink(missing_ok=True)
+                manifest_path.unlink(missing_ok=True)
+                manifest_path.parent.rmdir()
 
         return self._perform_upload(fp, dataset_type, collection, human_name, notes, meta, extra_files, parent_list)
 
