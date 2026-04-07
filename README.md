@@ -73,7 +73,7 @@ obtools connect
 | `info` | yes | Show dataset details and lineage |
 | `ingest` | yes | Discover raw MS files, create samples, upload datasets |
 | `search` | yes | Search datasets, samples, experiments |
-| `upload` | yes | Upload a file (auto-detect type) |
+| `upload` | yes | Upload a file or folder (auto-detect type; folder → zipped) |
 | `upload-fasta` | yes | Upload a FASTA database |
 | `upload-lib` | yes | Upload a DIA-NN spectral library |
 | `register` | yes | Create BIOL_DDB samples directly in OpenBIS |
@@ -286,11 +286,34 @@ obtools upload-lib library.tsv --log-file diann.log \
 
 ### Generic upload (auto-detect type)
 
+Auto-detects file type by extension, or accepts a **folder** (zipped before upload, structure preserved).
+
 ```bash
 obtools upload myfile.fasta        # detected as fasta
 obtools upload mylib.tsv           # detected as spectral_library
 obtools upload datafile.txt        # uploaded as unknown type
+obtools upload results/            # folder → zipped and uploaded as unknown type
 ```
+
+**Folder upload with exclusions:**
+
+```bash
+obtools upload results/ \
+  --collection /DDB/CK/RESULTS \
+  --exclude '*.log' \
+  --exclude '__pycache__/**' \
+  --exclude '.DS_Store'
+```
+
+`--exclude` accepts any `fnmatch` glob pattern and can be repeated. Patterns are matched against both the full relative path and the filename, so `*.log` excludes log files in subdirectories too.
+
+Preview what would be included/excluded before uploading:
+
+```bash
+obtools upload results/ --collection /DDB/CK/RESULTS --exclude '*.tmp' --dry-run
+```
+
+Folders are zipped to a temporary file (stdlib `zipfile`) and the zip is deleted after upload. The archive preserves the folder structure with the folder itself as the top-level entry, identical to what you would get with `zip -r results.zip results/`.
 
 ---
 

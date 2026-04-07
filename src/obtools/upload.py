@@ -8,13 +8,49 @@ and dataset naming specific to each file type.
 
 from __future__ import annotations
 
+import fnmatch
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 
 from pybis import Openbis
 
 from .diann import parse_diann_log, parse_fasta_metadata
 from .autolink import suggest_parents, interactive_confirm
+
+
+# ---------------------------------------------------------------------------
+# Folder helpers
+# ---------------------------------------------------------------------------
+
+def _matches_any_exclude(rel_path: str, excludes: list[str]) -> bool:
+    """Return True if rel_path (or its basename) matches any exclude glob pattern."""
+    name = Path(rel_path).name
+    return any(fnmatch.fnmatch(rel_path, p) or fnmatch.fnmatch(name, p) for p in excludes)
+
+
+def _collect_folder_files(folder: Path, excludes: list[str]) -> tuple[list[Path], list[Path]]:
+    """Walk folder, split files into included/excluded based on patterns."""
+    included, excluded = [], []
+    for f in sorted(folder.rglob("*")):
+        if not f.is_file():
+            continue
+        rel = str(f.relative_to(folder.parent))
+        (excluded if _matches_any_exclude(rel, excludes) else included).append(f)
+    return included, excluded
+
+
+def _zip_folder(folder: Path, excludes: list[str]) -> Path:
+    """Zip folder contents into a temp file, preserving structure from folder's parent."""
+    included, _ = _collect_folder_files(folder, excludes)
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False, prefix=f"{folder.name}_")
+    tmp.close()
+    zip_path = Path(tmp.name)
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for f in included:
+            zf.write(f, f.relative_to(folder.parent))
+    return zip_path
 
 
 # ---------------------------------------------------------------------------
@@ -85,13 +121,15 @@ class Uploader:
         extra_files: list[str] | None = None,
         auto_link: bool = False,
         dry_run: bool = False,
+        exclude: list[str] | None = None,
         **kwargs,
     ):
         fp = Path(file_path)
         if not fp.exists():
-            print(f"❌ File not found: {fp}")
+            print(f"❌ Not found: {fp}")
             sys.exit(1)
 
+        is_folder = fp.is_dir()
         meta = self.parse_metadata(fp, **kwargs)
         human_name = self.make_name(fp, meta, name)
 
@@ -105,12 +143,43 @@ class Uploader:
             parent_list.extend(confirmed)
 
         if dry_run:
-            self._show_dry_run(fp, human_name, collection, dataset_type, notes, meta, extra_files, parent_list)
+            if is_folder:
+                self._show_dry_run_folder(fp, human_name, collection, dataset_type, notes, extra_files, parent_list, exclude or [])
+            else:
+                self._show_dry_run(fp, human_name, collection, dataset_type, notes, meta, extra_files, parent_list)
             return None
+
+        if is_folder:
+            zip_path = _zip_folder(fp, exclude or [])
+            try:
+                return self._perform_upload(zip_path, dataset_type, collection, human_name, notes, meta, extra_files, parent_list)
+            finally:
+                zip_path.unlink(missing_ok=True)
 
         return self._perform_upload(fp, dataset_type, collection, human_name, notes, meta, extra_files, parent_list)
 
     # ------------------------------------------------------------------
+
+    def _show_dry_run_folder(self, fp, name, collection, ds_type, notes, extra_files, parents, excludes):
+        included, excluded = _collect_folder_files(fp, excludes)
+        print(f"\n🔍 Dry run — would zip and upload folder:")
+        print(f"   Folder:       {fp}")
+        print(f"   Name:         {name}")
+        print(f"   Collection:   {collection}")
+        print(f"   Dataset type: {ds_type}")
+        print(f"   Files:        {len(included)} included")
+        if excluded:
+            print(f"   Excluded:     {len(excluded)} file(s)")
+            for f in excluded[:5]:
+                print(f"     {f.relative_to(fp.parent)}")
+            if len(excluded) > 5:
+                print(f"     ... and {len(excluded) - 5} more")
+        if notes:
+            print(f"   Notes:        {notes}")
+        if extra_files:
+            print(f"   Extra files:  {len(extra_files)}")
+        if parents:
+            print(f"   Parents:      {', '.join(parents)}")
 
     def _show_dry_run(self, fp, name, collection, ds_type, notes, meta, extra_files, parents):
         print(f"\n🔍 Dry run — would upload:")

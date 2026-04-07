@@ -141,7 +141,10 @@ def cmd_upload(args):
     from .upload import detect_file_type, get_uploader, default_collection, default_dataset_type
     o = _conn()
 
-    file_type = args.type if args.type != "auto" else detect_file_type(args.file)
+    import os
+    file_type = args.type if args.type != "auto" else (
+        "unknown" if os.path.isdir(args.file) else detect_file_type(args.file)
+    )
     print(f"🔍 File type: {file_type}")
 
     collection   = args.collection   or default_collection(file_type)
@@ -157,6 +160,7 @@ def cmd_upload(args):
         parents=args.parent_dataset,
         auto_link=args.auto_link,
         dry_run=args.dry_run,
+        exclude=args.exclude,
         version=args.version,
         log_file=args.log_file,
     )
@@ -390,11 +394,14 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--dry-run", action="store_true")
 
     # ---- upload (auto-detect) ----
-    up = sub.add_parser("upload", help="Upload any file (auto-detect type)")
-    up.add_argument("file")
+    up = sub.add_parser("upload", help="Upload any file or folder (auto-detect type)")
+    up.add_argument("file", metavar="file_or_folder")
     up.add_argument("--type", choices=["auto", "fasta", "spectral_library"], default="auto")
     up.add_argument("--version")
     up.add_argument("--log-file")
+    up.add_argument("--exclude", action="append", metavar="PATTERN",
+                    help="Exclude files matching glob pattern (repeatable, folder uploads only). "
+                         "E.g. --exclude '*.log' --exclude '__pycache__/**'")
     _upload_common(up)
 
     # ---- upload-fasta ----
