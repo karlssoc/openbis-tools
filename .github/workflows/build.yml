@@ -1,0 +1,56 @@
+name: build-standalone
+
+# Builds single-file `obtools` executables. PyInstaller cannot cross-compile,
+# so each target OS is built on its own runner. Trigger manually, or on a tag.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: obtools-windows
+            binary: dist/obtools.exe
+          - os: macos-latest
+            artifact: obtools-macos-arm64
+            binary: dist/obtools
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[secure]" pyinstaller
+
+      - name: Build
+        run: python -m PyInstaller --clean --noconfirm packaging/obtools.spec
+
+      - name: Smoke test
+        run: ${{ matrix.binary }} cred show
+
+      - name: Seed portable config folder
+        shell: bash
+        run: |
+          mkdir -p dist/.obtools
+          cp packaging/portable-readme.txt dist/.obtools/README.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          # Ship the binary plus the .obtools/ folder so the download is
+          # portable-by-default once both land in the same folder on the stick.
+          path: |
+            ${{ matrix.binary }}
+            dist/.obtools/

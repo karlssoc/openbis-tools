@@ -85,14 +85,12 @@ a **passphrase-encrypted** password there — the stick carries no readable secr
 and the host PC's keychain/profile is never touched.
 
 Build a self-contained `obtools.exe` (no Python on the acquisition PC) with
-PyInstaller, then drop a `.obtools/` config folder beside it:
-
-```bash
-pip install 'openbis-tools[secure]' pyinstaller
-printf 'from obtools.cli import main\nmain()\n' > launch.py
-pyinstaller --onefile --name obtools --collect-all pybis launch.py
-# → dist/obtools.exe   (copy to the stick, then create  <stick>/.obtools/  beside it)
-```
+PyInstaller. Since PyInstaller can't cross-compile, the easiest way to get a
+Windows `.exe` from a Mac is the bundled **GitHub Actions** workflow — see
+[`packaging/README.md`](packaging/README.md) for that and for local build
+scripts (`packaging/build.ps1`, `packaging/build.sh`). The build emits the
+binary plus a `.obtools/` folder; drop both in the same folder on the stick and
+run `obtools cred set`.
 
 ---
 
