@@ -84,13 +84,16 @@ put a `.obtools/` folder next to the executable and run `obtools cred set` to wr
 a **passphrase-encrypted** password there — the stick carries no readable secret,
 and the host PC's keychain/profile is never touched.
 
-Build a self-contained `obtools.exe` (no Python on the acquisition PC) with
-PyInstaller. Since PyInstaller can't cross-compile, the easiest way to get a
-Windows `.exe` from a Mac is the bundled **GitHub Actions** workflow — see
-[`packaging/README.md`](packaging/README.md) for that and for local build
-scripts (`packaging/build.ps1`, `packaging/build.sh`). The build emits the
-binary plus a `.obtools/` folder; drop both in the same folder on the stick and
-run `obtools cred set`.
+Prebuilt self-contained binaries (no Python on the acquisition PC) are published
+on the repo's **[Releases](../../releases)** page — download
+`obtools-windows-x64.zip`, unzip it onto the stick (it includes a `.obtools/`
+folder for portable mode), and run `obtools cred set`. Release assets download
+anonymously, so no GitHub account is needed.
+
+To build it yourself (PyInstaller can't cross-compile, so a Windows `.exe` is
+built on a Windows runner via the bundled GitHub Actions workflow, or locally
+with `packaging/build.ps1` / `packaging/build.sh`) see
+[`packaging/README.md`](packaging/README.md).
 
 ---
 

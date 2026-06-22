@@ -6,15 +6,26 @@ installed**, for portable USB use (see "Portable use" in the top-level README).
 > **PyInstaller is not a cross-compiler.** A Windows `.exe` must be built on
 > Windows, a macOS binary on macOS. Pick the option that matches the target.
 
-## Option A — GitHub Actions (recommended; build Windows from a Mac)
+## Option A — GitHub Release (recommended; no build, no GitHub login)
 
-You don't need a Windows machine. The `.github/workflows/build.yml` workflow
-builds both Windows and macOS binaries on hosted runners.
+Pushing a `vX.Y.Z` tag runs the `build-standalone` workflow, which builds the
+Windows and macOS binaries and publishes them as **Release assets**:
 
-1. Push this repo to GitHub.
-2. Actions tab → **build-standalone** → **Run workflow** (or push a `vX.Y.Z` tag).
-3. Download the `obtools-windows` artifact — it contains `obtools.exe` plus a
-   `.obtools/` folder. Unzip both into the same folder on the USB stick.
+1. From the repo landing page, open **Releases** (right sidebar), pick the
+   version, and download `obtools-windows-x64.zip` (or `obtools-macos-arm64.zip`).
+2. Unzip onto the USB stick — each zip contains the binary plus a `.obtools/`
+   folder, so it runs in portable mode immediately.
+
+Release assets download anonymously over a stable URL — anyone can grab them
+without a GitHub account, unlike Actions artifacts (which live under the Actions
+tab, need a login, and expire). To cut a release, bump the version and push a tag:
+
+```bash
+git tag -a v0.2.3 -m "obtools 0.2.3" && git push origin v0.2.3
+```
+
+A manual **Actions → build-standalone → Run workflow** (no tag) still builds the
+same zips but leaves them as Actions artifacts instead of a release.
 
 ## Option B — local build
 

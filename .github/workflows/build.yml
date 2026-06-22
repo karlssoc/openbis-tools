@@ -1,7 +1,9 @@
 name: build-standalone
 
 # Builds single-file `obtools` executables. PyInstaller cannot cross-compile,
-# so each target OS is built on its own runner. Trigger manually, or on a tag.
+# so each target OS is built on its own runner. On a vX.Y.Z tag the binaries are
+# published as downloadable GitHub Release assets; manual runs just leave them
+# as Actions artifacts.
 on:
   workflow_dispatch:
   push:
@@ -15,10 +17,10 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact: obtools-windows
+            target: windows-x64
             binary: dist/obtools.exe
           - os: macos-latest
-            artifact: obtools-macos-arm64
+            target: macos-arm64
             binary: dist/obtools
     runs-on: ${{ matrix.os }}
     steps:
@@ -39,18 +41,47 @@ jobs:
       - name: Smoke test
         run: ${{ matrix.binary }} cred show
 
-      - name: Seed portable config folder
+      - name: Stage portable package
         shell: bash
         run: |
-          mkdir -p dist/.obtools
-          cp packaging/portable-readme.txt dist/.obtools/README.txt
+          # Binary + a .obtools/ folder so the package is portable-by-default:
+          # unzip both into one folder on the stick and obtools runs portably.
+          mkdir -p pkg/.obtools
+          cp "${{ matrix.binary }}" pkg/
+          cp packaging/portable-readme.txt pkg/.obtools/README.txt
+
+      - name: Zip (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path pkg\obtools.exe, pkg\.obtools -DestinationPath obtools-${{ matrix.target }}.zip
+
+      - name: Zip (Unix)
+        if: runner.os != 'Windows'
+        run: cd pkg && zip -r ../obtools-${{ matrix.target }}.zip obtools .obtools
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          # Ship the binary plus the .obtools/ folder so the download is
-          # portable-by-default once both land in the same folder on the stick.
-          path: |
-            ${{ matrix.binary }}
-            dist/.obtools/
+          name: obtools-${{ matrix.target }}
+          path: obtools-${{ matrix.target }}.zip
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: obtools-*
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" artifacts/*.zip \
+            --title "obtools ${GITHUB_REF_NAME}" \
+            --generate-notes
