@@ -11,6 +11,10 @@ requires-python = ">=3.9"
 authors = [{ name = "CK" }]
 dependencies = ["pybis>=1.37.3"]
 
+[project.optional-dependencies]
+# Passphrase-encrypted credentials for the portable USB build (`obtools cred set`)
+secure = ["cryptography>=41"]
+
 [project.scripts]
 obtools = "obtools.cli:main"
 

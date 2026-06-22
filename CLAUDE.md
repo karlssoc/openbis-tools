@@ -31,10 +31,24 @@ All source lives in `src/obtools/`. No sub-packages — flat module layout.
 
 Every handler calls `_conn()` which delegates to `connection.get()` → returns an authenticated `pybis.Openbis` object with token caching (pybis saves tokens to `~/.pybis/session.json`; reused until expiry).
 
+### Portable config root (`paths.py`)
+
+`config_root()` resolves a single base dir for all per-user state (credentials file,
+pybis token cache, default download dir): `$OBTOOLS_HOME` → a `.obtools/` folder next
+to the `obtools` executable (USB-stick case) → `~/.openbis` (default install). This
+keeps the tool portable on shared Windows acquisition PCs with no host-profile footprint.
+`connection.py` patches pybis's hardcoded `~/.pybis` token path to `config_root()/.pybis`.
+
 ### Credential loading (`auth.py`)
 
-Priority: `~/.openbis/credentials` file → OS keychain → environment variables.
-Keys: `OPENBIS_URL`, `OPENBIS_USERNAME`, `OPENBIS_PASSWORD`, `OBTOOLS_DOWNLOAD_DIR`, `OBTOOLS_VERIFY_CERTS`.
+Credentials file lives at `config_root()/credentials` (KEY=VALUE).
+Password resolution priority (highest wins): env var → OS keychain →
+`OPENBIS_PASSWORD_ENC` (passphrase-decrypted in `require()`) → plaintext `OPENBIS_PASSWORD`.
+`load()` is non-interactive; the passphrase prompt happens only in `require()`.
+Encryption is scrypt (KDF) + Fernet, gated behind the optional `[secure]` extra (`cryptography`).
+Set/inspect via `obtools cred set` / `obtools cred show`.
+Keys: `OPENBIS_URL`, `OPENBIS_USERNAME`, `OPENBIS_PASSWORD`, `OPENBIS_PASSWORD_ENC`,
+`OBTOOLS_DOWNLOAD_DIR`, `OBTOOLS_VERIFY_CERTS`.
 
 ### Upload system (`upload.py`)
 

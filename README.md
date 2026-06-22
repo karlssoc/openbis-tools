@@ -8,6 +8,9 @@ Proteomics-focused OpenBIS CLI toolkit for LU-IMP group. Installs a single comma
 
 ```bash
 pipx install git+https://github.com/karlssoc/openbis-tools.git
+
+# With passphrase-encrypted credentials (recommended for portable/USB use):
+pipx install "git+https://github.com/karlssoc/openbis-tools.git#egg=openbis-tools[secure]"
 ```
 
 
@@ -22,42 +25,73 @@ obtools --help
 
 ## Credentials
 
+The quickest way to set up credentials is the interactive `cred` command:
+
 ```bash
-mkdir -p ~/.openbis && chmod 700 ~/.openbis
-cp credentials.example ~/.openbis/credentials
-chmod 600 ~/.openbis/credentials
+obtools cred set      # prompts for URL, username, password + passphrase
 ```
 
-Edit `~/.openbis/credentials`:
+By default the password is **encrypted with a passphrase** (scrypt + Fernet) and
+stored in a `credentials` file under the config root. You are prompted once per
+session to unlock it. Requires the `[secure]` extra (`pip install 'openbis-tools[secure]'`).
+
+```bash
+obtools cred show     # show config-root location and which fields are set
+obtools connect       # test the connection
+```
+
+Other ways to provide the password:
+
+- **OS keychain** (macOS/Linux desktop installs):
+  ```bash
+  # macOS
+  security add-generic-password -a your_username -s openbis-tools -w
+  # Linux (requires libsecret-tools)
+  secret-tool store --label=openbis-tools service openbis-tools username your_username
+  ```
+- **Environment variables** (`OPENBIS_URL`, `OPENBIS_USERNAME`, `OPENBIS_PASSWORD`) — override all other sources.
+- **Plaintext file** — `obtools cred set --plaintext`, or edit the file directly.
+
+The credentials file is plain `KEY=VALUE` (run `obtools cred show` to find it):
 
 ```
 OPENBIS_URL=https://your-server.com/openbis/
 OPENBIS_USERNAME=your_username
+OPENBIS_PASSWORD_ENC=<salt:token>     # written by `cred set` (encrypted)
 
 # Optional
 # OBTOOLS_DOWNLOAD_DIR=~/data/openbis
 # OBTOOLS_VERIFY_CERTS=false
 ```
 
-**Store your password in the OS keychain** (recommended — no plaintext passwords):
+---
+
+## Portable use (USB stick on acquisition PCs)
+
+`obtools` is designed to run from a USB stick on shared Windows acquisition PCs
+for occasional manual ingest, **without leaving credentials or session tokens in
+the host PC's user profile**.
+
+All per-user state (credentials file, pybis session-token cache, default download
+dir) is anchored to a single **config root**, resolved in this order:
+
+1. `$OBTOOLS_HOME` — explicit override
+2. a `.obtools/` folder sitting next to the `obtools` executable/launcher on the stick
+3. `~/.openbis` — backward-compatible default for normal installs
+
+So on a normal `pipx` install nothing changes. To make a stick fully portable,
+put a `.obtools/` folder next to the executable and run `obtools cred set` to write
+a **passphrase-encrypted** password there — the stick carries no readable secret,
+and the host PC's keychain/profile is never touched.
+
+Build a self-contained `obtools.exe` (no Python on the acquisition PC) with
+PyInstaller, then drop a `.obtools/` config folder beside it:
 
 ```bash
-# macOS
-security add-generic-password -a your_username -s openbis-tools -w
-
-# Windows
-cmdkey /generic:openbis-tools /user:your_username /pass:your_password
-
-# Linux (requires libsecret-tools)
-secret-tool store --label=openbis-tools service openbis-tools username your_username
-```
-
-`obtools` reads the password from the keychain automatically. Environment variables (`OPENBIS_URL`, `OPENBIS_USERNAME`, `OPENBIS_PASSWORD`) override all other sources if set.
-
-Test your connection:
-
-```bash
-obtools connect
+pip install 'openbis-tools[secure]' pyinstaller
+printf 'from obtools.cli import main\nmain()\n' > launch.py
+pyinstaller --onefile --name obtools --collect-all pybis launch.py
+# → dist/obtools.exe   (copy to the stick, then create  <stick>/.obtools/  beside it)
 ```
 
 ---
@@ -66,6 +100,7 @@ obtools connect
 
 | Command | Requires connection | Description |
 |---|---|---|
+| `cred` | **no** | Store (encrypted) / show OpenBIS credentials |
 | `connect` | yes | Test connection and list spaces |
 | `download` | yes | Download a dataset by code |
 | `download-collection` | yes | Download all datasets in a collection |
@@ -498,26 +533,23 @@ obtools info 20250502110516300-1323376 --lineage
 
 ## Credential reference
 
-`~/.openbis/credentials` — KEY=VALUE, one per line. Lines starting with `#` are ignored. Values may be quoted or unquoted.
+The `credentials` file (under the config root — see `obtools cred show`) is
+KEY=VALUE, one per line. Lines starting with `#` are ignored. Values may be quoted or unquoted.
 
 | Key | Required | Description |
 |---|---|---|
 | `OPENBIS_URL` | yes | Full server URL including `/openbis/` |
 | `OPENBIS_USERNAME` | yes | Your OpenBIS username |
-| `OPENBIS_PASSWORD` | no* | Password — prefer macOS Keychain (see below) |
+| `OPENBIS_PASSWORD` | no* | Plaintext password (prefer `OPENBIS_PASSWORD_ENC` or the keychain) |
+| `OPENBIS_PASSWORD_ENC` | no* | Passphrase-encrypted password written by `obtools cred set` |
 | `OBTOOLS_DOWNLOAD_DIR` | no | Default download directory (default: `~/data/openbis`) |
 | `OBTOOLS_VERIFY_CERTS` | no | SSL certificate verification: `true` or `false` (default: `false`) |
 
-\* `OPENBIS_PASSWORD` is required but can be stored in the OS keychain instead of the file.
+\* A password is required, supplied by exactly one of: `OPENBIS_PASSWORD`,
+`OPENBIS_PASSWORD_ENC`, the OS keychain, or the `OPENBIS_PASSWORD` env var.
 
-**Credential priority (highest wins):** environment variable → macOS Keychain → credentials file
+**Password resolution priority (highest wins):** environment variable → OS keychain
+→ encrypted file (`OPENBIS_PASSWORD_ENC`, prompts passphrase) → plaintext file.
 
-**Store password in OS keychain:**
-```bash
-# macOS
-security add-generic-password -a your_username -s openbis-tools -w
-# Windows
-cmdkey /generic:openbis-tools /user:your_username /pass:your_password
-# Linux
-secret-tool store --label=openbis-tools service openbis-tools username your_username
-```
+The config root is set by `$OBTOOLS_HOME`, else a `.obtools/` folder next to the
+executable, else `~/.openbis` (see [Portable use](#portable-use-usb-stick-on-acquisition-pcs)).

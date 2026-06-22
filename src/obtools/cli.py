@@ -4,6 +4,7 @@ obtools — proteomics-focused OpenBIS CLI toolkit.
 Entry point: obtools <command> [options]
 
 Commands:
+  cred                 Store/show OpenBIS credentials (encrypted; portable)
   connect              Test connection and list spaces
   download             Download a dataset
   download-collection  Download all datasets from a collection
@@ -275,6 +276,64 @@ def cmd_vocab(args):
         show_vocabulary(o, args.vocab_code.upper())
     else:
         list_vocabularies(o)
+
+
+def cmd_cred(args):
+    """Manage stored credentials (set / show)."""
+    import getpass
+    from . import auth
+    from .paths import config_root
+
+    if args.cred_action == "show":
+        creds = auth.load()
+        print(f"Config root:      {config_root()}")
+        print(f"Credentials file: {auth.creds_file()}"
+              f"  {'(exists)' if auth.creds_file().exists() else '(missing)'}")
+        print(f"  OPENBIS_URL:      {creds.get('OPENBIS_URL') or '— not set —'}")
+        print(f"  OPENBIS_USERNAME: {creds.get('OPENBIS_USERNAME') or '— not set —'}")
+        if creds.get("OPENBIS_PASSWORD"):
+            print("  password:         set (plaintext / keychain / env)")
+        elif creds.get("OPENBIS_PASSWORD_ENC"):
+            print("  password:         set (encrypted — passphrase required)")
+        else:
+            print("  password:         — not set —")
+        return
+
+    # cred set
+    existing = auth.load()
+    url = args.url or input(f"OpenBIS URL [{existing.get('OPENBIS_URL', '')}]: ").strip() \
+        or existing.get("OPENBIS_URL", "")
+    username = args.username or input(f"Username [{existing.get('OPENBIS_USERNAME', '')}]: ").strip() \
+        or existing.get("OPENBIS_USERNAME", "")
+    if not url or not username:
+        print("❌ URL and username are required.")
+        sys.exit(1)
+
+    password = getpass.getpass("OpenBIS password: ")
+    if not password:
+        print("❌ Empty password.")
+        sys.exit(1)
+
+    values = {"OPENBIS_URL": url, "OPENBIS_USERNAME": username}
+    for k in ("OBTOOLS_DOWNLOAD_DIR", "OBTOOLS_VERIFY_CERTS"):
+        if existing.get(k):
+            values[k] = existing[k]
+
+    if args.plaintext:
+        values["OPENBIS_PASSWORD"] = password
+        mode = "plaintext"
+    else:
+        passphrase = getpass.getpass("Encryption passphrase: ")
+        if passphrase != getpass.getpass("Confirm passphrase: "):
+            print("❌ Passphrases do not match.")
+            sys.exit(1)
+        values["OPENBIS_PASSWORD_ENC"] = auth.encrypt_password(password, passphrase)
+        mode = "encrypted"
+
+    path = auth.write_creds_file(values)
+    print(f"✅ Saved {mode} credentials → {path}")
+    if mode == "plaintext":
+        print("   ⚠️  Password stored in plaintext. Re-run without --plaintext to encrypt.")
 
 
 def cmd_locate(args):
@@ -599,6 +658,28 @@ def build_parser() -> argparse.ArgumentParser:
     # Pass-through flags for register_samples (used when --n is set)
     _reg_common(ms_p)
 
+    # ---- cred ----
+    cr = sub.add_parser(
+        "cred",
+        help="Manage stored OpenBIS credentials (set / show)",
+        description=(
+            "Store credentials under the portable config root (see `obtools cred show`).\n\n"
+            "By default the password is encrypted with a passphrase (scrypt + Fernet),\n"
+            "so a USB stick carries no readable password and nothing touches the host\n"
+            "PC's keychain or profile. Use --plaintext to store it unencrypted instead.\n\n"
+            "Examples:\n"
+            "  obtools cred set                 # interactive, encrypted (recommended)\n"
+            "  obtools cred set --plaintext     # store password unencrypted\n"
+            "  obtools cred show                # show config location and what is set\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    cr.add_argument("cred_action", choices=["set", "show"], help="Action to perform")
+    cr.add_argument("--url", help="OpenBIS URL (prompted if omitted)")
+    cr.add_argument("--username", help="OpenBIS username (prompted if omitted)")
+    cr.add_argument("--plaintext", action="store_true",
+                    help="Store the password unencrypted instead of passphrase-encrypted")
+
     # ---- locate ----
     loc = sub.add_parser(
         "locate",
@@ -660,6 +741,7 @@ def build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 
 _HANDLERS = {
+    "cred":                cmd_cred,
     "connect":             cmd_connect,
     "download":            cmd_download,
     "download-collection": cmd_download_collection,
