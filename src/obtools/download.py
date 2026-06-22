@@ -14,19 +14,22 @@ from pybis import Openbis
 
 from .auth import load
 
-DEFAULT_DOWNLOAD_DIR = load().get("OBTOOLS_DOWNLOAD_DIR", str(Path.home() / "data" / "openbis"))
+
+def default_download_dir() -> str:
+    """Resolve the default download directory at call time (not import time)."""
+    return load().get("OBTOOLS_DOWNLOAD_DIR", str(Path.home() / "data" / "openbis"))
 
 
 def download_dataset(
     o: Openbis,
     dataset_code: str,
-    output_dir: str = DEFAULT_DOWNLOAD_DIR,
+    output_dir: str | None = None,
     *,
     list_only: bool = False,
     force: bool = False,
 ) -> None:
     """Download a single dataset to output_dir."""
-    out = Path(output_dir)
+    out = Path(output_dir or default_download_dir())
 
     try:
         dataset = o.get_dataset(dataset_code)
@@ -67,13 +70,14 @@ def download_dataset(
 def download_collection(
     o: Openbis,
     collection_path: str,
-    output_dir: str = DEFAULT_DOWNLOAD_DIR,
+    output_dir: str | None = None,
     *,
     list_only: bool = False,
     limit: int | None = None,
     force: bool = False,
 ) -> None:
     """Download all datasets in an OpenBIS collection."""
+    output_dir = output_dir or default_download_dir()
     print(f"  🔍 Fetching datasets in {collection_path} ...")
     try:
         datasets = o.get_datasets(experiment=collection_path)
@@ -165,7 +169,7 @@ def extract_bruker_zips(
 def download_bruker(
     o: Openbis,
     codes: list[str],
-    output_dir: str = DEFAULT_DOWNLOAD_DIR,
+    output_dir: str | None = None,
     *,
     collection: str | None = None,
     list_only: bool = False,
@@ -175,6 +179,7 @@ def download_bruker(
     jobs: int = 4,
 ) -> None:
     """Download Bruker .zip datasets and optionally extract to .d folders."""
+    output_dir = output_dir or default_download_dir()
     if collection:
         download_collection(
             o, collection, output_dir,

@@ -607,12 +607,13 @@ def build_parser() -> argparse.ArgumentParser:
             "Two modes:\n\n"
             "  --pattern REGEX     Scan file_list of datasets in --collection(s).\n"
             "                      Reliable but slower (one API call per dataset).\n\n"
-            "  --from-file FILE    Read filenames (one per line), query by file_name\n"
-            "                      property. Fast: one call per filename.\n"
-            "                      Requires datasets to have been ingested with obtools.\n"
-            "                      --collection is optional (used as post-filter).\n\n"
+            "  --from-file FILE    Read filenames (one per line), match against the\n"
+            "                      file_name property. Fast: one bulk fetch per\n"
+            "                      collection. Requires datasets ingested with obtools.\n\n"
+            "Both modes require at least one --collection.\n\n"
             "Examples:\n"
-            "  obtools locate --from-file filenames.txt --save results.csv\n"
+            "  obtools locate --from-file filenames.txt \\\n"
+            "      --collection /MS_DATA/MINERVA/2020-06 --save results.csv\n"
             "  obtools locate --pattern 'ALE_[PM]\\d{4}_\\d{3}\\.raw$' \\\n"
             "      --collection /MS_DATA/PYTHIA/2020-06 \\\n"
             "      --collection /MS_DATA/MINERVA/2020-06 \\\n"
@@ -626,8 +627,7 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--from-file", metavar="FILE",
                       help="Text file with one filename per line (# lines ignored)")
     loc.add_argument("--collection", "-c", action="append", metavar="PATH",
-                     help="OpenBIS collection path (repeatable; required for --pattern, "
-                          "optional filter for --from-file)")
+                     help="OpenBIS collection path to search (repeatable; required)")
     loc.add_argument("--dataset-type", default="RAW_DATA", metavar="TYPE",
                      help="Dataset type filter (default: RAW_DATA)")
     loc.add_argument("--save", "-o", metavar="FILE.csv",

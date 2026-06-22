@@ -278,13 +278,16 @@ def _upload_dataset(
         if sample_id:
             try:
                 ds.sample = sample_id
-            except Exception:
-                pass   # not all pybis versions support this — skip gracefully
+            except Exception as exc:
+                print(f"    ⚠️  Could not link sample {sample_id}: {exc}")
+        skipped: list[str] = []
         for key, value in props.items():
             try:
                 ds.props[key] = value
             except Exception:
-                pass   # unknown property — server will reject; skip gracefully
+                skipped.append(key)   # unknown property for this dataset type
+        if skipped:
+            print(f"    ⚠️  Properties not set (unknown for {dataset_type}): {', '.join(skipped)}")
         ds.save()
         return ds.permId
     except Exception as exc:
