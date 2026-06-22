@@ -223,22 +223,33 @@ def load() -> dict:
     return creds
 
 
+def unlock_password(creds: dict) -> dict:
+    """Resolve an encrypted password in-place (prompts for the passphrase once).
+
+    No-op if a plaintext password is already present or no encrypted password
+    is stored. Call this only when a password is actually needed (i.e. a fresh
+    login), so a valid cached session token never triggers a passphrase prompt.
+    """
+    if creds.get("OPENBIS_PASSWORD") or not creds.get("OPENBIS_PASSWORD_ENC"):
+        return creds
+
+    for attempt in range(3):
+        try:
+            passphrase = getpass.getpass("Passphrase to unlock OpenBIS password: ")
+        except (EOFError, KeyboardInterrupt):
+            print("\n❌ No passphrase provided.")
+            sys.exit(1)
+        pw = decrypt_password(creds["OPENBIS_PASSWORD_ENC"], passphrase)
+        if pw:
+            creds["OPENBIS_PASSWORD"] = pw
+            return creds
+        print("  ❌ Wrong passphrase." + (" Try again." if attempt < 2 else ""))
+    sys.exit(1)
+
+
 def require() -> dict:
     """Load credentials, decrypt the password if needed, and exit on missing keys."""
-    creds = load()
-
-    # Resolve an encrypted password interactively (prompt once).
-    if not creds.get("OPENBIS_PASSWORD") and creds.get("OPENBIS_PASSWORD_ENC"):
-        for attempt in range(3):
-            passphrase = getpass.getpass("Passphrase to unlock OpenBIS password: ")
-            pw = decrypt_password(creds["OPENBIS_PASSWORD_ENC"], passphrase)
-            if pw:
-                creds["OPENBIS_PASSWORD"] = pw
-                break
-            print("  ❌ Wrong passphrase." + (" Try again." if attempt < 2 else ""))
-        else:
-            sys.exit(1)
-
+    creds = unlock_password(load())
     missing = [k for k in ("OPENBIS_URL", "OPENBIS_USERNAME", "OPENBIS_PASSWORD") if not creds.get(k)]
     if missing:
         print(f"❌ Missing credentials: {', '.join(missing)}")
