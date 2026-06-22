@@ -16,6 +16,7 @@ Commands:
   register-tsv         Generate a BIOL_DDB registration TSV file (offline)
   vocab                List controlled vocabulary terms from OpenBIS
   ingest               Discover raw files, create samples, upload datasets
+  locate               Find datasets by filename pattern across collections
   make-sequence        Generate a HyStar sequence file for Timmie (TimsTOF HT)
 """
 
@@ -274,6 +275,20 @@ def cmd_vocab(args):
         show_vocabulary(o, args.vocab_code.upper())
     else:
         list_vocabularies(o)
+
+
+def cmd_locate(args):
+    from .locate import locate_datasets
+    o = _conn()
+    locate_datasets(
+        o,
+        pattern=args.pattern,
+        from_file=args.from_file,
+        collections=args.collection,
+        dataset_type=args.dataset_type,
+        save=args.save,
+        jobs=args.jobs,
+    )
 
 
 def cmd_make_sequence(args):
@@ -584,6 +599,42 @@ def build_parser() -> argparse.ArgumentParser:
     # Pass-through flags for register_samples (used when --n is set)
     _reg_common(ms_p)
 
+    # ---- locate ----
+    loc = sub.add_parser(
+        "locate",
+        help="Find datasets by filename pattern or list across collections",
+        description=(
+            "Two modes:\n\n"
+            "  --pattern REGEX     Scan file_list of datasets in --collection(s).\n"
+            "                      Reliable but slower (one API call per dataset).\n\n"
+            "  --from-file FILE    Read filenames (one per line), query by file_name\n"
+            "                      property. Fast: one call per filename.\n"
+            "                      Requires datasets to have been ingested with obtools.\n"
+            "                      --collection is optional (used as post-filter).\n\n"
+            "Examples:\n"
+            "  obtools locate --from-file filenames.txt --save results.csv\n"
+            "  obtools locate --pattern 'ALE_[PM]\\d{4}_\\d{3}\\.raw$' \\\n"
+            "      --collection /MS_DATA/PYTHIA/2020-06 \\\n"
+            "      --collection /MS_DATA/MINERVA/2020-06 \\\n"
+            "      --save results.csv\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    mode = loc.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--pattern", metavar="REGEX",
+                      help="Python regex matched against filenames")
+    mode.add_argument("--from-file", metavar="FILE",
+                      help="Text file with one filename per line (# lines ignored)")
+    loc.add_argument("--collection", "-c", action="append", metavar="PATH",
+                     help="OpenBIS collection path (repeatable; required for --pattern, "
+                          "optional filter for --from-file)")
+    loc.add_argument("--dataset-type", default="RAW_DATA", metavar="TYPE",
+                     help="Dataset type filter (default: RAW_DATA)")
+    loc.add_argument("--save", "-o", metavar="FILE.csv",
+                     help="Save results to CSV")
+    loc.add_argument("--jobs", "-j", type=int, default=16, metavar="N",
+                     help="Parallel workers (default: 16)")
+
     # ---- vocab ----
     vc = sub.add_parser(
         "vocab",
@@ -620,6 +671,7 @@ _HANDLERS = {
     "upload-lib":          cmd_upload_lib,
     "register":            cmd_register,
     "register-tsv":        cmd_register_tsv,
+    "locate":              cmd_locate,
     "vocab":               cmd_vocab,
     "ingest":              cmd_ingest,
     "make-sequence":       cmd_make_sequence,
