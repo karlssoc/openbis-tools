@@ -16,6 +16,11 @@ an OPENBIS_PASSWORD_ENC token (passphrase-derived, scrypt + Fernet) so no
 readable password is left on the stick, and nothing touches the host PC's
 keychain or profile.
 
+For unattended runs (scheduled QC uploads) supply the passphrase via the
+OBTOOLS_PASSPHRASE env var: require() decrypts OPENBIS_PASSWORD_ENC with it
+non-interactively instead of prompting. Set it only in the task's own
+environment so the secret stays scoped to the service account.
+
 Store the password in the OS keychain instead (non-portable installs):
   macOS:   security add-generic-password -a <username> -s openbis-tools -w
   Windows: cmdkey /generic:openbis-tools /user:<username> /pass:<password>
@@ -232,6 +237,18 @@ def unlock_password(creds: dict) -> dict:
     """
     if creds.get("OPENBIS_PASSWORD") or not creds.get("OPENBIS_PASSWORD_ENC"):
         return creds
+
+    # Non-interactive path: passphrase supplied via env var (unattended QC
+    # uploads, scheduled tasks). Tried before prompting so a headless run
+    # never blocks on getpass; a wrong/missing value fails fast instead.
+    env_passphrase = os.environ.get("OBTOOLS_PASSPHRASE")
+    if env_passphrase:
+        pw = decrypt_password(creds["OPENBIS_PASSWORD_ENC"], env_passphrase)
+        if pw:
+            creds["OPENBIS_PASSWORD"] = pw
+            return creds
+        print("❌ OBTOOLS_PASSPHRASE did not unlock the stored password.")
+        sys.exit(1)
 
     for attempt in range(3):
         try:
