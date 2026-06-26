@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import platform
 import sqlite3
 import sys
 import tempfile
@@ -48,6 +49,19 @@ def _is_mac_metadata(path: Path) -> bool:
 # Metadata extraction
 # ---------------------------------------------------------------------------
 
+def _coerce_openbis_timestamp(value: str) -> str | None:
+    """Reformat an ISO-ish datetime string to the OpenBIS TIMESTAMP format.
+
+    Bruker's TDF AcquisitionDateTime uses a 'T' separator that OpenBIS rejects;
+    parse and re-emit it as 'YYYY-MM-DD HH:MM:SS +ZZZZ'. Returns None if the
+    value can't be parsed.
+    """
+    try:
+        return _openbis_timestamp(datetime.datetime.fromisoformat(value))
+    except (ValueError, TypeError):
+        return None
+
+
 def _bruker_acquisition_date(d_dir: Path) -> str | None:
     """
     Read acquisition datetime from a Bruker timsTOF analysis.tdf SQLite file.
@@ -74,6 +88,29 @@ def _file_mtime_iso(path: Path) -> str:
     return datetime.datetime.fromtimestamp(mtime).astimezone().isoformat()
 
 
+def _file_creation_dt(path: Path) -> datetime.datetime:
+    """Best-effort file *creation* time as a tz-aware local datetime.
+
+    Uses st_birthtime where the platform exposes it (macOS, newer Linux);
+    on Windows st_ctime is the creation time. Falls back to mtime elsewhere
+    (on classic Unix st_ctime is the inode-change time, not creation).
+    """
+    st = path.stat()
+    ts = getattr(st, "st_birthtime", None)
+    if ts is None:
+        ts = st.st_ctime if platform.system() == "Windows" else st.st_mtime
+    return datetime.datetime.fromtimestamp(ts).astimezone()
+
+
+def _openbis_timestamp(dt: datetime.datetime) -> str:
+    """Format a datetime the way OpenBIS TIMESTAMP properties expect.
+
+    e.g. '2026-06-26 12:03:18 +0200'. OpenBIS rejects the 'T' separator that
+    datetime.isoformat() emits, which silently drops the property on upload.
+    """
+    return dt.strftime("%Y-%m-%d %H:%M:%S %z").strip()
+
+
 def _build_dataset_props(
     raw: "RawFile",
     upload_path: Path,
@@ -83,24 +120,33 @@ def _build_dataset_props(
     """
     Build a dict of OpenBIS dataset properties for a raw acquisition.
 
-    - file_name / file_size: derived from the upload path
-    - ACQUISITION_DATE: read from Bruker TDF, or file mtime for Thermo
-    - INSTRUMENT_SN / INSTRUMENT_NAME: vendor-specific defaults
+    Property codes MUST be lowercase: pybis matches RAW_DATA property codes
+    case-sensitively and stores them lowercase, so an uppercase code is
+    silently rejected as unknown.
+
+    - file_name (VARCHAR) / file_size (INTEGER): derived from the upload path
+    - acquisition_date (TIMESTAMP): Bruker TDF time, else the file creation time
+    - instrument_sn / instrument_name (VARCHAR): vendor-specific defaults
     """
     props: dict = {
         "file_name": raw.path.name,
-        "file_size": str(upload_path.stat().st_size),
+        "file_size": upload_path.stat().st_size,        # INTEGER, send an int
     }
 
     if raw.vendor == "bruker":
-        props["INSTRUMENT_SN"] = "MS:1003404"
-        props["INSTRUMENT_NAME"] = "timsTOF_HT"
-        date = _bruker_acquisition_date(raw.path)
-        props["ACQUISITION_DATE"] = date if date else _file_mtime_iso(raw.path)
+        props["instrument_sn"] = "MS:1003404"
+        props["instrument_name"] = "timsTOF_HT"
+        tdf_date = _bruker_acquisition_date(raw.path)
+        props["acquisition_date"] = (
+            (_coerce_openbis_timestamp(tdf_date) if tdf_date else None)
+            or _openbis_timestamp(_file_creation_dt(raw.path))
+        )
     else:
-        props["INSTRUMENT_SN"] = raw_instrument_sn
-        props["INSTRUMENT_NAME"] = raw_instrument_name
-        props["ACQUISITION_DATE"] = _file_mtime_iso(raw.path)
+        props["instrument_sn"] = raw_instrument_sn
+        props["instrument_name"] = raw_instrument_name
+        # Thermo .raw carries no embedded acquisition timestamp here; use the
+        # file creation event as the acquisition time.
+        props["acquisition_date"] = _openbis_timestamp(_file_creation_dt(raw.path))
 
     return props
 
@@ -357,10 +403,14 @@ def _upload_dataset(
         for key, value in props.items():
             try:
                 ds.props[key] = value
-            except Exception:
-                skipped.append(key)   # unknown property for this dataset type
+            except Exception as exc:
+                # Surface the real reason: a code not assigned to this dataset
+                # type reads differently than a value/format/type mismatch.
+                skipped.append(f"{key}={value!r} -> {type(exc).__name__}: {exc}")
         if skipped:
-            print(f"    ⚠️  Properties not set (unknown for {dataset_type}): {', '.join(skipped)}")
+            print(f"    ⚠️  Properties not set for {dataset_type}:")
+            for s in skipped:
+                print(f"          - {s}")
         ds.save()
         return ds.permId
     except Exception as exc:
