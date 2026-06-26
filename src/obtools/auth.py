@@ -81,7 +81,7 @@ def _derive_key(passphrase: str, salt: bytes):
 
 def encrypt_password(password: str, passphrase: str) -> str:
     """Return a 'salt:token' string safe to store in the credentials file."""
-    from cryptography.fernet import Fernet
+    Fernet, _ = _require_cryptography()
     salt = os.urandom(16)
     token = Fernet(_derive_key(passphrase, salt)).encrypt(password.encode())
     return f"{base64.urlsafe_b64encode(salt).decode()}:{token.decode()}"
