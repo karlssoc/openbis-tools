@@ -23,6 +23,10 @@ REM ---------------------------------------------------------------------------
 REM Fallback only: uncomment if the scheduled task cannot see the user env var.
 REM set "OBTOOLS_PASSPHRASE=your-passphrase"
 
+REM Force UTF-8 so emoji progress output never hits the cp1252 console codec
+REM (obtools >= 0.2.6 also handles this itself; harmless to keep).
+set "PYTHONUTF8=1"
+
 set "OBTOOLS=%USERPROFILE%\.local\bin\obtools.exe"
 set "LOG=%USERPROFILE%\obtools-qc.log"
 

@@ -788,7 +788,23 @@ _HANDLERS = {
 }
 
 
+def _force_utf8_output():
+    """Make stdout/stderr UTF-8 so emoji output never crashes the CLI.
+
+    When obtools runs unattended (output redirected to a file, no console),
+    Windows falls back to the cp1252 code page, which cannot encode the emoji
+    in our progress messages — the first print would raise UnicodeEncodeError.
+    Reconfiguring to UTF-8 with errors='replace' makes output robust anywhere.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass  # already-detached or non-reconfigurable stream
+
+
 def main():
+    _force_utf8_output()
     parser = build_parser()
     args = parser.parse_args()
     handler = _HANDLERS.get(args.command)
