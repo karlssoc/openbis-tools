@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import datetime
+import json
 import sqlite3
 import sys
 import tempfile
@@ -26,6 +27,8 @@ import zipfile
 from pathlib import Path
 
 from pybis import Openbis
+
+from .paths import config_root
 
 # ---------------------------------------------------------------------------
 # macOS metadata patterns to exclude from Bruker zip archives
@@ -138,6 +141,76 @@ def discover(source: str | Path) -> list[RawFile]:
             found.append(RawFile(entry, "bruker"))
 
     return found
+
+
+# ---------------------------------------------------------------------------
+# Incremental ingest: ledger + time filters (for scheduled/unattended runs)
+# ---------------------------------------------------------------------------
+
+def _ledger_path() -> Path:
+    """JSON ledger of already-uploaded files, under the portable config root."""
+    return config_root() / "ingested.json"
+
+
+def _load_ledger() -> dict:
+    path = _ledger_path()
+    if path.exists():
+        try:
+            return json.loads(path.read_text())
+        except (ValueError, OSError):
+            pass
+    return {}
+
+
+def _save_ledger(ledger: dict) -> None:
+    path = _ledger_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(ledger, indent=2))
+    except OSError as exc:
+        print(f"    ⚠️  Could not write ledger {path}: {exc}")
+
+
+def _already_ingested(ledger: dict, collection: str, raw: RawFile) -> bool:
+    """True if this file was uploaded before and is unchanged since (size + mtime).
+
+    A re-acquired file reusing the same name has a different size/mtime, so it
+    is re-uploaded rather than silently skipped. Bruker .d directories match on
+    mtime only (a directory's own size is not meaningful).
+    """
+    entry = ledger.get(collection, {}).get(raw.path.name)
+    if not entry:
+        return False
+    try:
+        st = raw.path.stat()
+    except OSError:
+        return False
+    if abs(entry.get("mtime", 0) - st.st_mtime) >= 1.0:
+        return False
+    return raw.is_dir or entry.get("size") == st.st_size
+
+
+def _record_ingested(ledger: dict, collection: str, raw: RawFile, dataset_id: str) -> None:
+    try:
+        st = raw.path.stat()
+    except OSError:
+        return
+    ledger.setdefault(collection, {})[raw.path.name] = {
+        "size": st.st_size,
+        "mtime": st.st_mtime,
+        "dataset_id": dataset_id,
+        "uploaded_at": datetime.datetime.now().astimezone().isoformat(),
+    }
+
+
+def _mtime_dt(raw: RawFile) -> datetime.datetime:
+    """File modification time as a timezone-aware (local) datetime."""
+    return datetime.datetime.fromtimestamp(raw.path.stat().st_mtime).astimezone()
+
+
+def _age_minutes(raw: RawFile) -> float:
+    """Minutes since the file was last modified (proxy for 'still acquiring')."""
+    return (datetime.datetime.now().timestamp() - raw.path.stat().st_mtime) / 60.0
 
 
 # ---------------------------------------------------------------------------
@@ -310,12 +383,19 @@ def ingest(
     sample_type: str = "BIOL_DDB",
     prefix: str | None = None,
     skip_samples: bool = False,
+    skip_existing: bool = False,
+    min_age_minutes: float = 0,
+    since: datetime.datetime | None = None,
     raw_instrument_sn: str = "MS:1000529",
     raw_instrument_name: str = "Q_Exactive_HF-X_Orbitrap",
     dry_run: bool = False,
 ) -> None:
     """
     Full ingest workflow: discover → archive Bruker dirs → create samples → upload datasets.
+
+    For scheduled/unattended QC uploads, set skip_existing (skip files recorded
+    in the ledger), min_age_minutes (skip files still being acquired), and/or
+    since (skip files modified before this datetime).
     """
     source_path = Path(source)
 
@@ -326,6 +406,24 @@ def ingest(
     if not files:
         print("  ℹ️  No .raw files or .d directories found.")
         return
+
+    # 1b. Incremental filters (no-ops unless the corresponding option is set)
+    ledger = _load_ledger()
+    if skip_existing or min_age_minutes or since:
+        kept: list[RawFile] = []
+        for f in files:
+            if since and _mtime_dt(f) < since:
+                print(f"    ⏭️  Skipping (before --since): {f.path.name}")
+            elif min_age_minutes and _age_minutes(f) < min_age_minutes:
+                print(f"    ⏳ Skipping (modified < {min_age_minutes:g} min ago, may still be acquiring): {f.path.name}")
+            elif skip_existing and _already_ingested(ledger, collection_path, f):
+                print(f"    ✓ Already ingested: {f.path.name}")
+            else:
+                kept.append(f)
+        files = kept
+        if not files:
+            print("\n  ℹ️  Nothing new to ingest.")
+            return
 
     thermo = [f for f in files if f.vendor == "thermo"]
     bruker = [f for f in files if f.vendor == "bruker"]
@@ -384,6 +482,10 @@ def ingest(
         ds_id = _upload_dataset(o, collection_path, upload_path, dataset_type, sample_id, props, dry_run)
         if ds_id:
             print(f"    📊 Dataset: {ds_id}")
+            if not dry_run:
+                # Save incrementally so a crash/reboot never re-uploads done files.
+                _record_ingested(ledger, collection_path, raw, ds_id)
+                _save_ledger(ledger)
 
         results.append({
             "file": raw.path.name,

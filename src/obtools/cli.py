@@ -358,7 +358,20 @@ def cmd_make_sequence(args):
 
 def cmd_ingest(args):
     """Discover raw files, create samples, upload datasets."""
+    import datetime
     from .ingest import ingest
+
+    since = None
+    if args.since:
+        try:
+            since = datetime.datetime.fromisoformat(args.since)
+        except ValueError:
+            print(f"❌ Invalid --since value '{args.since}'. Use ISO format, "
+                  f"e.g. 2026-06-25 or 2026-06-25T14:00.")
+            sys.exit(1)
+        if since.tzinfo is None:          # treat a naive value as local time
+            since = since.astimezone()
+
     o = _conn()
     ingest(
         o,
@@ -370,6 +383,9 @@ def cmd_ingest(args):
         sample_type=args.sample_type,
         prefix=args.prefix,
         skip_samples=args.skip_samples,
+        skip_existing=args.skip_existing,
+        min_age_minutes=args.min_age_minutes,
+        since=since,
         raw_instrument_sn=args.raw_instrument_sn,
         raw_instrument_name=args.raw_instrument_name,
         dry_run=args.dry_run,
@@ -576,7 +592,10 @@ def build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  obtools ingest /data/runs/ --collection /DDB/CK/E_Sepsis2025\n"
             "  obtools ingest /data/runs/ --collection /DDB/CK/E_New --create-collection\n"
-            "  obtools ingest /data/runs/ --collection /DDB/CK/E_Sepsis2025 --dry-run"
+            "  obtools ingest /data/runs/ --collection /DDB/CK/E_Sepsis2025 --dry-run\n"
+            "  # unattended QC loop (idempotent, ignores in-progress + pre-cutoff files):\n"
+            "  obtools ingest D:/QC/raw --collection /DDB/CK/E_QC --skip-samples \\\n"
+            "          --skip-existing --min-age-minutes 10 --since 2026-06-25"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -596,6 +615,15 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Prefix for sample $NAME (default: source directory name)")
     ing.add_argument("--skip-samples", action="store_true",
                      help="Upload datasets only, do not create samples")
+    ing.add_argument("--skip-existing", action="store_true",
+                     help="Skip files already recorded in the upload ledger "
+                          "(makes scheduled/repeated runs idempotent)")
+    ing.add_argument("--min-age-minutes", type=float, default=0, metavar="MIN",
+                     help="Skip files modified within the last MIN minutes "
+                          "(avoids uploading acquisitions still in progress)")
+    ing.add_argument("--since", metavar="DATETIME",
+                     help="Only upload files modified on/after this ISO datetime, "
+                          "e.g. 2026-06-25 or 2026-06-25T14:00")
     ing.add_argument("--raw-instrument-sn", default="MS:1000529", metavar="SN",
                      help="INSTRUMENT_SN for Thermo .raw files (default: MS:1000529)")
     ing.add_argument("--raw-instrument-name", default="Q_Exactive_HF-X_Orbitrap", metavar="NAME",
