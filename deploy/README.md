@@ -1,4 +1,16 @@
-# Unattended QC raw-file upload (Windows instrument PC)
+# Minerva instrument-PC scheduled tasks
+
+Two scheduled tasks run on the Minerva (HF-X) instrument PC under a dedicated
+standard user (`medk-cka`), not the shared `admin` account:
+
+1. **QC raw-file upload** (`obtools-qc.bat`) — uploads QC `.raw` files to
+   OpenBIS via `obtools ingest`. Runs headless (whether logged on or not).
+2. **QC dashboard sync** (`qc-dashboard-sync.bat`) — pulls the QC dashboard
+   HTML from the LU SMB share to a local copy for viewing at the bench.
+
+---
+
+# 1. Unattended QC raw-file upload
 
 Continuously upload QC `.raw` files from an acquisition PC to OpenBIS using a
 scheduled `obtools ingest` run. Designed for a locked-down instrument PC where
@@ -89,3 +101,67 @@ schtasks /Delete /TN "obtools-qc-upload" /F            # remove
   periodically (e.g. a second daily task that keeps the last N lines).
 - If `obtools` is not found, the pipx shim PATH may not load for the task;
   the `.bat` already calls it by full path (`%USERPROFILE%\.local\bin\obtools.exe`).
+
+---
+
+# 2. QC dashboard sync
+
+An automated QC analysis on the LU Linux HPC writes a dashboard HTML to an SMB
+share. This task copies that dashboard to a local folder on the instrument PC so
+it can be viewed at the bench without keeping the share open.
+
+- Source (LU SMB, Windows UNC form):
+  `\\uw.lu.se\research\LU25D1040-imp_arch\General\Data\imp\minerva\qc\qc-dashboard.html`
+- The dashboard is a single **self-contained** HTML (Plotly with embedded data);
+  only that one file is copied — the sibling `qc.sqlite` is not needed to view it.
+
+## Authentication
+
+The share requires the LU login (`medk-cka@uw.lu.se`). Because the task runs
+**in the logged-on `medk-cka` session** (`/IT`), it reuses that session's
+existing authentication to `\\uw.lu.se` — **no stored credential is needed** and
+the UNC path is accessed directly (no mapped drive).
+
+> Only one connection per server per session is allowed. If a
+> `New-PSDrive`/`net use` to `\\uw.lu.se` already exists with different
+> credentials you get *"Multiple connections ... not allowed"* — clear it with
+> `net use \\uw.lu.se\research /delete` first.
+
+## Install and register
+
+Copy `qc-dashboard-sync.bat` to the PC (e.g. `C:\QC\qc-dashboard-sync.bat`),
+create the destination, and register the task:
+
+```powershell
+New-Item -ItemType Directory -Force C:\QC\dashboard | Out-Null
+
+schtasks /Create /TN "qc-dashboard-sync" /TR "C:\QC\qc-dashboard-sync.bat" `
+  /SC MINUTE /MO 30 /RU medk-cka /IT /RL LIMITED /F
+```
+
+## Verify
+
+```powershell
+schtasks /Run /TN "qc-dashboard-sync"
+Get-Content $env:USERPROFILE\qc-dashboard-sync.log -Tail 20
+```
+
+Confirm `C:\QC\dashboard\qc-dashboard.html` appears/updates. robocopy exit
+codes < 8 are success (`1` = copied, `0` = already current).
+
+## Headless variant (nobody logged in)
+
+Bare UNC access works only because the interactive session carries the LU auth.
+To run with nobody logged in, drop `/IT` and instead authenticate inside the
+task with a DPAPI-encrypted credential (only `medk-cka` on this machine can
+decrypt it):
+
+```powershell
+# once, in an interactive medk-cka session:
+Get-Credential -UserName "medk-cka@uw.lu.se" -Message "LU share" |
+  Export-Clixml "$env:USERPROFILE\lu-share.cred.xml"
+```
+
+Then use a `.ps1` task that does
+`Import-Clixml` → `New-PSDrive -Credential` → `Copy-Item` → `Remove-PSDrive`,
+registered with `/RU medk-cka /RP *` (no `/IT`).
