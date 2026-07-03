@@ -5,8 +5,10 @@ standard user (`medk-cka`), not the shared `admin` account:
 
 1. **QC raw-file upload** (`obtools-qc.bat`) — uploads QC `.raw` files to
    OpenBIS via `obtools ingest`. Runs headless (whether logged on or not).
-2. **QC dashboard sync** (`qc-dashboard-sync.bat`) — pulls the QC dashboard
-   HTML from the LU SMB share to a local copy for viewing at the bench.
+2. **QC dashboard sync** (`qc-dashboard-sync.ps1`) — pulls the QC dashboard
+   HTML from the LU SMB share to a local copy for viewing at the bench. Runs
+   headless with a stored LU credential. (`qc-dashboard-sync.bat` is an older
+   interactive-only variant, kept for reference.)
 
 ---
 
@@ -115,53 +117,53 @@ it can be viewed at the bench without keeping the share open.
 - The dashboard is a single **self-contained** HTML (Plotly with embedded data);
   only that one file is copied — the sibling `qc.sqlite` is not needed to view it.
 
-## Authentication
+## Authentication — run headless with a stored credential
 
-The share requires the LU login (`medk-cka@uw.lu.se`). Because the task runs
-**in the logged-on `medk-cka` session** (`/IT`), it reuses that session's
-existing authentication to `\\uw.lu.se` — **no stored credential is needed** and
-the UNC path is accessed directly (no mapped drive).
+The share requires the LU login (`medk-cka@uw.lu.se`), and that password is
+**different** from the local Windows `medk-cka` password, so a batch logon
+cannot reach the share on its own. The task therefore authenticates with a
+**DPAPI-encrypted credential** (`lu-share.cred.xml`) that only `medk-cka` on this
+machine can decrypt — and runs **whether logged on or not**.
 
-> Only one connection per server per session is allowed. If a
-> `New-PSDrive`/`net use` to `\\uw.lu.se` already exists with different
-> credentials you get *"Multiple connections ... not allowed"* — clear it with
-> `net use \\uw.lu.se\research /delete` first.
+> An earlier `/IT` (interactive-only) version silently stopped: the bench
+> console user is `admin`, not `medk-cka`, so the `medk-cka` interactive task
+> never fired once its session ended. Headless avoids depending on who is
+> logged in.
+
+`qc-dashboard-sync.ps1` does: `Import-Clixml` → `New-PSDrive -Credential` →
+`Copy-Item` → `Remove-PSDrive`, logging to `%USERPROFILE%\qc-dashboard-sync.log`.
 
 ## Install and register
 
-Copy `qc-dashboard-sync.bat` to the PC (e.g. `C:\QC\qc-dashboard-sync.bat`),
-create the destination, and register the task:
-
 ```powershell
 New-Item -ItemType Directory -Force C:\QC\dashboard | Out-Null
+# copy qc-dashboard-sync.ps1 to C:\QC\
 
-schtasks /Create /TN "qc-dashboard-sync" /TR "C:\QC\qc-dashboard-sync.bat" `
-  /SC MINUTE /MO 30 /RU medk-cka /IT /RL LIMITED /F
+# 1. Seed the encrypted LU credential AS medk-cka (needed so the DPAPI key is
+#    medk-cka's). If not logged in as medk-cka, open a medk-cka shell first:
+runas /user:medk-cka powershell
+#    ...then in that shell:
+Get-Credential -UserName "medk-cka@uw.lu.se" -Message "LU share" |
+  Export-Clixml "$env:USERPROFILE\lu-share.cred.xml"
+
+# 2. Register the task, whether-logged-on-or-not (/RP prompts for medk-cka's
+#    Windows password so it can store a batch logon):
+schtasks /Create /TN "qc-dashboard-sync" `
+  /TR "powershell -NoProfile -ExecutionPolicy Bypass -File C:\QC\qc-dashboard-sync.ps1" `
+  /SC MINUTE /MO 30 /RU medk-cka /RP * /RL LIMITED /F
 ```
 
 ## Verify
 
 ```powershell
 schtasks /Run /TN "qc-dashboard-sync"
-Get-Content $env:USERPROFILE\qc-dashboard-sync.log -Tail 20
+Get-Content $env:USERPROFILE\qc-dashboard-sync.log -Tail 10
 ```
 
-Confirm `C:\QC\dashboard\qc-dashboard.html` appears/updates. robocopy exit
-codes < 8 are success (`1` = copied, `0` = already current).
+The log should show `copied OK`, and `C:\QC\dashboard\qc-dashboard.html` should
+update to the current share timestamp.
 
-## Headless variant (nobody logged in)
-
-Bare UNC access works only because the interactive session carries the LU auth.
-To run with nobody logged in, drop `/IT` and instead authenticate inside the
-task with a DPAPI-encrypted credential (only `medk-cka` on this machine can
-decrypt it):
-
-```powershell
-# once, in an interactive medk-cka session:
-Get-Credential -UserName "medk-cka@uw.lu.se" -Message "LU share" |
-  Export-Clixml "$env:USERPROFILE\lu-share.cred.xml"
-```
-
-Then use a `.ps1` task that does
-`Import-Clixml` → `New-PSDrive -Credential` → `Copy-Item` → `Remove-PSDrive`,
-registered with `/RU medk-cka /RP *` (no `/IT`).
+> Only one connection per server per session is allowed. If a `New-PSDrive` /
+> `net use` to `\\uw.lu.se` already exists with different credentials you get
+> *"Multiple connections ... not allowed"* — clear it with
+> `net use \\uw.lu.se\research /delete` first.
