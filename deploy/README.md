@@ -1,22 +1,22 @@
-# Minerva instrument-PC scheduled tasks
+# Minerva instrument-PC scheduled task — OpenBIS QC ingest
 
-Two scheduled tasks run on the Minerva (HF-X) instrument PC under a dedicated
-standard user (`medk-cka`), not the shared `admin` account:
+Continuously upload QC `.raw` files from the Minerva (HF-X) instrument PC to
+OpenBIS using a scheduled `obtools ingest` run (`obtools-qc.bat`). Designed for a
+locked-down instrument PC where the tool runs as a dedicated standard user
+(`medk-cka`), not the shared `admin` account.
 
-1. **QC raw-file upload** (`obtools-qc.bat`) — uploads QC `.raw` files to
-   OpenBIS via `obtools ingest`. Runs headless (whether logged on or not).
-2. **QC dashboard sync** (`qc-dashboard-sync.bat`) — pulls the QC dashboard
-   HTML from the LU SMB share to a local copy for viewing at the bench. Runs
-   headless, authenticating via a saved Credential Manager entry.
-   (`qc-dashboard-sync.ps1` is a DPAPI-credential fallback.)
+> **The active QC pipeline uses SMB storage, not OpenBIS**, and lives in the
+> **`ms-qc`** repo (`~/Projects/Tools/ms-qc`): its `deploy/qc-raw-upload.ps1`
+> uploads raws to an SMB share, and `deploy/qc-dashboard-sync.{ps1,bat}` pulls
+> the dashboard back to the bench. This `obtools-qc.bat` is the **legacy/
+> alternative** path, kept for setups that store QC raws permanently in OpenBIS
+> (`source: openbis` in ms-qc's config). If you have migrated to SMB, stop this
+> task: `schtasks /End /TN "obtools-qc-upload"` then
+> `schtasks /Change /TN "obtools-qc-upload" /DISABLE`.
 
 ---
 
-# 1. Unattended QC raw-file upload
-
-Continuously upload QC `.raw` files from an acquisition PC to OpenBIS using a
-scheduled `obtools ingest` run. Designed for a locked-down instrument PC where
-the tool runs as a dedicated standard user (not the shared `admin` account).
+# Unattended QC raw-file upload to OpenBIS
 
 ## Prerequisites
 
@@ -103,90 +103,3 @@ schtasks /Delete /TN "obtools-qc-upload" /F            # remove
   periodically (e.g. a second daily task that keeps the last N lines).
 - If `obtools` is not found, the pipx shim PATH may not load for the task;
   the `.bat` already calls it by full path (`%USERPROFILE%\.local\bin\obtools.exe`).
-
----
-
-# 2. QC dashboard sync
-
-An automated QC analysis on the LU Linux HPC writes a dashboard HTML to an SMB
-share. This task copies that dashboard to a local folder on the instrument PC so
-it can be viewed at the bench without keeping the share open.
-
-- Source (LU SMB, Windows UNC form):
-  `\\uw.lu.se\research\LU25D1040-imp_arch\General\Data\imp\minerva\qc\qc-dashboard.html`
-- The dashboard is a single **self-contained** HTML (Plotly with embedded data);
-  only that one file is copied — the sibling `qc.sqlite` is not needed to view it.
-
-## Authentication — headless via a saved credential
-
-The share requires the LU login (`medk-cka@uw.lu.se`), which is a **different**
-password from the local Windows `medk-cka` account. The task authenticates with a
-credential saved once in `medk-cka`'s **Windows Credential Manager**, and runs
-**whether logged on or not** (`/RP *`, no `/IT`).
-
-Why this works headless: a task started with `/RP *` supplies `medk-cka`'s
-Windows password, so the batch logon can unlock DPAPI and read the saved
-`uw.lu.se` credential — robocopy then reaches the UNC path directly. (A passwordless
-logon, e.g. an SSH key-auth session, can't: DPAPI stays locked, so the saved
-credential is unreadable and the share returns access-denied.)
-
-> An earlier `/IT` (interactive-only) version silently stopped once the
-> `medk-cka` desktop session ended — the bench console user is `admin`, not
-> `medk-cka`. Headless avoids depending on who is logged in.
-
-### One-time: save the credential
-
-As `medk-cka` (interactive), authenticate to the share once so it lands in
-Credential Manager — e.g. map it persistently (tick "remember my credentials"
-when prompted):
-
-```powershell
-New-PSDrive -Name S -Root "\\uw.lu.se\research" -Persist -PSProvider FileSystem -Credential (Get-Credential)
-```
-
-Once saved, the drive letter itself is irrelevant to the task — only the stored
-credential matters.
-
-## Install and register
-
-```powershell
-New-Item -ItemType Directory -Force C:\QC\dashboard | Out-Null
-# copy qc-dashboard-sync.bat to C:\QC\
-
-# /RP * prompts for medk-cka's Windows password (stored so it runs headless):
-schtasks /Create /TN "qc-dashboard-sync" /TR "C:\QC\qc-dashboard-sync.bat" `
-  /SC MINUTE /MO 30 /RU medk-cka /RP * /RL LIMITED /F
-```
-
-## Verify
-
-```powershell
-schtasks /Run /TN "qc-dashboard-sync"
-Get-Content C:\Users\medk-cka\qc-dashboard-sync.log -Tail 6
-```
-
-Expect `robocopy rc=1` (copied) or `rc=0` (already current), and
-`C:\QC\dashboard\qc-dashboard.html` updated to the current share timestamp. Note
-the log lives in the task account's profile (`C:\Users\medk-cka\`).
-
-## Fallback: no saved credential (DPAPI)
-
-If Credential Manager has no `uw.lu.se` entry, use `qc-dashboard-sync.ps1`
-instead — it authenticates with a DPAPI-encrypted credential file that only
-`medk-cka` can decrypt (`Import-Clixml` → `New-PSDrive -Credential` →
-`Copy-Item`). Seed it once **as medk-cka** (so the DPAPI key is medk-cka's):
-
-```powershell
-# e.g. via:  runas /user:medk-cka powershell
-Get-Credential -UserName "medk-cka@uw.lu.se" -Message "LU share" |
-  Export-Clixml "$env:USERPROFILE\lu-share.cred.xml"
-```
-
-Then register with
-`/TR "powershell -NoProfile -ExecutionPolicy Bypass -File C:\QC\qc-dashboard-sync.ps1"`
-(same `/RP *`).
-
-> Only one connection per server per session is allowed. If a `New-PSDrive` /
-> `net use` to `\\uw.lu.se` already exists with different credentials you get
-> *"Multiple connections ... not allowed"* — clear it with
-> `net use \\uw.lu.se\research /delete` first.
