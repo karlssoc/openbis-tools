@@ -345,6 +345,7 @@ def cmd_locate(args):
         from_file=args.from_file,
         collections=args.collection,
         dataset_type=args.dataset_type,
+        registration_date=args.registration_date,
         save=args.save,
         jobs=args.jobs,
     )
@@ -713,16 +714,23 @@ def build_parser() -> argparse.ArgumentParser:
         "locate",
         help="Find datasets by filename pattern or list across collections",
         description=(
-            "Two modes:\n\n"
-            "  --pattern REGEX     Scan file_list of datasets in --collection(s).\n"
-            "                      Reliable but slower (one API call per dataset).\n\n"
-            "  --from-file FILE    Read filenames (one per line), match against the\n"
-            "                      file_name property. Fast: one bulk fetch per\n"
-            "                      collection. Requires datasets ingested with obtools.\n\n"
-            "Both modes require at least one --collection.\n\n"
+            "Without --collection (recommended): one bulk query over all datasets\n"
+            "of --dataset-type, matching the FILE_NAME property client-side. FILE_NAME\n"
+            "is set on datamover (/MS_DATA/...) and DDB/obtools registrations alike,\n"
+            "so you don't need to know which collection a run landed in.\n"
+            "Narrow it with --registration-date (e.g. '>2023-01-01').\n\n"
+            "With --collection(s):\n"
+            "  --pattern REGEX     Scan file_list of each dataset (one API call per\n"
+            "                      dataset; exhaustive but slow).\n"
+            "  --from-file FILE    Bulk fetch per collection, match FILE_NAME.\n\n"
+            "Output includes md5, size and registration date; a filename registered\n"
+            "more than once is flagged as duplicate. --save writes rows as they are\n"
+            "found, so an interrupted scan keeps its progress. Long lookups are much\n"
+            "faster on an LU host than over the VPN.\n\n"
             "Examples:\n"
-            "  obtools locate --from-file filenames.txt \\\n"
-            "      --collection /MS_DATA/MINERVA/2020-06 --save results.csv\n"
+            "  obtools locate --from-file filenames.txt --save results.csv\n"
+            "  obtools locate --pattern '^CK_P2304_\\d{3}\\.raw$' \\\n"
+            "      --registration-date '>2023-03-01' --save results.csv\n"
             "  obtools locate --pattern 'ALE_[PM]\\d{4}_\\d{3}\\.raw$' \\\n"
             "      --collection /MS_DATA/PYTHIA/2020-06 \\\n"
             "      --collection /MS_DATA/MINERVA/2020-06 \\\n"
@@ -736,7 +744,9 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--from-file", metavar="FILE",
                       help="Text file with one filename per line (# lines ignored)")
     loc.add_argument("--collection", "-c", action="append", metavar="PATH",
-                     help="OpenBIS collection path to search (repeatable; required)")
+                     help="Restrict to this collection (repeatable; omit to search all)")
+    loc.add_argument("--registration-date", metavar="EXPR",
+                     help="Registration date filter, e.g. '>2023-01-01'")
     loc.add_argument("--dataset-type", default="RAW_DATA", metavar="TYPE",
                      help="Dataset type filter (default: RAW_DATA)")
     loc.add_argument("--save", "-o", metavar="FILE.csv",
