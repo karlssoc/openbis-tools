@@ -9,6 +9,8 @@ and dataset naming specific to each file type.
 from __future__ import annotations
 
 import fnmatch
+import os
+import shutil
 import sys
 import tempfile
 import zipfile
@@ -50,6 +52,19 @@ def _zip_folder(folder: Path, included: list[Path]) -> Path:
         for f in included:
             zf.write(f, f.relative_to(folder.parent))
     return zip_path
+
+
+def _stage_folder(folder: Path, included: list[Path]) -> Path:
+    """Mirror included files into a temp dir named like folder (hardlink, copy as fallback)."""
+    staged = Path(tempfile.mkdtemp()) / folder.name
+    for f in included:
+        dest = staged / f.relative_to(folder)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.link(f, dest)
+        except OSError:  # cross-device or unsupported filesystem
+            shutil.copy2(f, dest)
+    return staged
 
 
 def _write_manifest(folder: Path, included: list[Path]) -> Path:
@@ -132,6 +147,7 @@ class Uploader:
         auto_link: bool = False,
         dry_run: bool = False,
         exclude: list[str] | None = None,
+        zip_folder: bool = True,
         **kwargs,
     ):
         fp = Path(file_path)
@@ -154,10 +170,21 @@ class Uploader:
 
         if dry_run:
             if is_folder:
-                self._show_dry_run_folder(fp, human_name, collection, dataset_type, notes, extra_files, parent_list, exclude or [])
+                self._show_dry_run_folder(fp, human_name, collection, dataset_type, notes, extra_files, parent_list, exclude or [], zip_folder)
             else:
                 self._show_dry_run(fp, human_name, collection, dataset_type, notes, meta, extra_files, parent_list)
             return None
+
+        if is_folder and not zip_folder:
+            # pybis (openBIS > 3.5) uploads a directory file-by-file, keeping its tree
+            if not exclude:
+                return self._perform_upload(fp, dataset_type, collection, human_name, notes, meta, extra_files, parent_list)
+            included, _ = _collect_folder_files(fp, exclude)
+            staged = _stage_folder(fp, included)
+            try:
+                return self._perform_upload(staged, dataset_type, collection, human_name, notes, meta, extra_files, parent_list)
+            finally:
+                shutil.rmtree(staged.parent, ignore_errors=True)
 
         if is_folder:
             included, _ = _collect_folder_files(fp, exclude or [])
@@ -175,9 +202,10 @@ class Uploader:
 
     # ------------------------------------------------------------------
 
-    def _show_dry_run_folder(self, fp, name, collection, ds_type, notes, extra_files, parents, excludes):
+    def _show_dry_run_folder(self, fp, name, collection, ds_type, notes, extra_files, parents, excludes, zip_folder=True):
         included, excluded = _collect_folder_files(fp, excludes)
-        print(f"\n🔍 Dry run — would zip and upload folder:")
+        action = "zip and upload" if zip_folder else "upload (unzipped, folder tree kept)"
+        print(f"\n🔍 Dry run — would {action} folder:")
         print(f"   Folder:       {fp}")
         print(f"   Name:         {name}")
         print(f"   Collection:   {collection}")

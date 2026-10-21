@@ -109,7 +109,7 @@ with `packaging/build.ps1` / `packaging/build.sh`) see
 | `info` | yes | Show dataset details and lineage |
 | `ingest` | yes | Discover raw MS files, create samples, upload datasets |
 | `search` | yes | Search datasets, samples, experiments |
-| `upload` | yes | Upload a file or folder (auto-detect type; folder → zipped) |
+| `upload` | yes | Upload a file or folder (auto-detect type; folder → zipped, or as-is with `--no-zip`) |
 | `upload-fasta` | yes | Upload a FASTA database |
 | `upload-lib` | yes | Upload a DIA-NN spectral library |
 | `register` | yes | Create BIOL_DDB samples directly in OpenBIS |
@@ -322,13 +322,14 @@ obtools upload-lib library.tsv --log-file diann.log \
 
 ### Generic upload (auto-detect type)
 
-Auto-detects file type by extension, or accepts a **folder** (zipped before upload, structure preserved).
+Auto-detects file type by extension, or accepts a **folder** (zipped before upload by default, structure preserved; `--no-zip` uploads it unzipped).
 
 ```bash
 obtools upload myfile.fasta        # detected as fasta
 obtools upload mylib.tsv           # detected as spectral_library
 obtools upload datafile.txt        # uploaded as unknown type
 obtools upload results/            # folder → zipped and uploaded as unknown type
+obtools upload results/ --no-zip   # folder → uploaded as-is, file tree kept in OpenBIS
 ```
 
 **Folder upload with exclusions:**
@@ -337,11 +338,22 @@ obtools upload results/            # folder → zipped and uploaded as unknown t
 obtools upload results/ \
   --collection /DDB/CK/RESULTS \
   --exclude '*.log' \
-  --exclude '__pycache__/**' \
+  --exclude '*/__pycache__/*' \
   --exclude '.DS_Store'
 ```
 
-`--exclude` accepts any `fnmatch` glob pattern and can be repeated. Patterns are matched against both the full relative path and the filename, so `*.log` excludes log files in subdirectories too.
+`--exclude` accepts any `fnmatch` glob pattern and can be repeated. Each file is excluded if the pattern matches **either** its filename **or** its path relative to the folder's *parent*, so the path always starts with the folder's own name (`results/sub/run.log`, not `sub/run.log`). In `fnmatch`, `*` also matches `/`, and `**` means the same as `*`.
+
+| Pattern | Excludes (for `obtools upload results/`) |
+|---|---|
+| `*.log` | every `.log` file at any depth (filename match) |
+| `.DS_Store` | every `.DS_Store` at any depth (filename match) |
+| `*/__pycache__/*` | everything inside any `__pycache__/` dir |
+| `results/tmp/*` | everything under `results/tmp/` |
+| `tmp/*` | nothing: the path starts with `results/` (use `*/tmp/*` or `results/tmp/*`) |
+| `__pycache__/**` | nothing, for the same reason |
+
+Exclusions work the same with or without `--no-zip`. Run `--dry-run` first: it lists how many files are included and shows the first few excluded ones.
 
 Preview what would be included/excluded before uploading:
 
@@ -350,6 +362,17 @@ obtools upload results/ --collection /DDB/CK/RESULTS --exclude '*.tmp' --dry-run
 ```
 
 Folders are zipped to a temporary file (stdlib `zipfile`) and the zip is deleted after upload. The archive preserves the folder structure with the folder itself as the top-level entry, identical to what you would get with `zip -r results.zip results/`.
+
+**Unzipped folder upload (`--no-zip`):**
+
+```bash
+obtools upload results/ --collection /DDB/CK/RESULTS --no-zip
+obtools upload results/ --collection /DDB/CK/RESULTS --no-zip --exclude '*.log' --dry-run
+```
+
+With `--no-zip`, pybis uploads every file separately, and the dataset in OpenBIS keeps the tree with `results/` as the top-level folder. Without `--exclude`, the folder is uploaded directly. With `--exclude`, the included files are first hardlinked (copied if the temp dir is on another volume) into a temporary `results/` tree, which is uploaded and then deleted. No `_manifest.txt` is added, because the file list is visible in OpenBIS. Empty subdirectories are dropped when `--exclude` is used.
+
+Keep zipping (the default) for Bruker `.d` folders, because `download-bruker` expects `.zip` datasets. Also keep it for folders with many small files: one archive uploads much faster than thousands of separate HTTP requests.
 
 ---
 

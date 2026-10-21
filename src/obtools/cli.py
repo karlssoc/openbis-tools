@@ -163,6 +163,7 @@ def cmd_upload(args):
         auto_link=args.auto_link,
         dry_run=args.dry_run,
         exclude=args.exclude,
+        zip_folder=not args.no_zip,
         version=args.version,
         log_file=args.log_file,
     )
@@ -492,7 +493,10 @@ def build_parser() -> argparse.ArgumentParser:
     up.add_argument("--log-file")
     up.add_argument("--exclude", action="append", metavar="PATTERN",
                     help="Exclude files matching glob pattern (repeatable, folder uploads only). "
-                         "E.g. --exclude '*.log' --exclude '__pycache__/**'")
+                         "E.g. --exclude '*.log' --exclude '*/__pycache__/*'")
+    up.add_argument("--no-zip", action="store_true",
+                    help="Upload a folder as-is (file tree kept in OpenBIS) instead of as a .zip. "
+                         "--exclude still applies.")
     _upload_common(up)
 
     # ---- upload-fasta ----
